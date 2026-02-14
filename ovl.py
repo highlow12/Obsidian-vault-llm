@@ -5,11 +5,6 @@ import os
 from pathlib import Path
 
 
-CONFIG_DIR = Path.home() / ".ovl"
-CONFIG_PATH = CONFIG_DIR / "config.yaml"
-API_KEY_PATH = CONFIG_DIR / "api_key.txt"
-
-
 def _yaml_quote(value: str) -> str:
     return '"' + value.replace('"', '\\"') + '"'
 
@@ -39,8 +34,9 @@ def run_init(vault: str, provider: str, api_key: str | None) -> int:
     api_key_ref = None
     if api_key:
         api_key_file = config_dir / "api_key.txt"
-        api_key_file.write_text(api_key + "\n", encoding="utf-8")
-        os.chmod(api_key_file, 0o600)
+        fd = os.open(api_key_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as secure_file:
+            secure_file.write(api_key + "\n")
         api_key_ref = f"file:{api_key_file}"
 
     config_content = _build_config(vault_path, provider, api_key_ref)
