@@ -2,6 +2,34 @@
 
 개발자가 바로 구현을 시작할 수 있도록 기능 명세와 기술 명세를 한 문서에 정리했습니다. Obsidian 볼트의 마크다운 노트를 LLM이 검색·요약·생성할 수 있도록 하는 로컬 우선(Local-first) 도구를 목표로 합니다.
 
+## GitHub Copilot 에이전트 한글 출력 설정
+
+GitHub Copilot 에이전트가 작업 중 모든 설명과 메시지를 한국어로 출력하도록 하려면:
+
+1. **`.github/copilot-instructions.md` 파일 생성**: 리포지토리 루트에 `.github` 디렉토리를 만들고 `copilot-instructions.md` 파일을 추가합니다.
+
+2. **한국어 출력 지시사항 추가**: 파일에 다음 내용을 작성합니다:
+   ```markdown
+   # Copilot Instructions
+   
+   - 모든 응답, 설명, 커밋 메시지를 한국어로 작성하세요.
+   - Write all responses, descriptions, and commit messages in Korean.
+   - 코드 작성 시 주석도 한국어로 작성하세요.
+   ```
+
+3. **Copilot 대화 시작 시 명시**: Copilot과 대화를 시작할 때 "한국어로 답변해 주세요" 또는 "Please respond in Korean"이라고 요청합니다.
+
+4. **워크스페이스 설정 파일 활용**: `.vscode/settings.json`에 다음을 추가할 수 있습니다:
+   ```json
+   {
+     "github.copilot.advanced": {
+       "language": "ko"
+     }
+   }
+   ```
+
+참고: GitHub Copilot의 언어 설정은 프롬프트 기반이므로, 대화 시작 시 명시적으로 한국어 사용을 요청하는 것이 가장 효과적입니다.
+
 ## 1. 목표와 성공 지표
 - 자연어로 볼트 내용을 질문하면 근거가 표시된 답변을 3초 이내에 제공한다 (Top-K 검색 + LLM 응답, warm 캐시=프로세스/벡터 스토어/LLM 커넥션이 이미 준비된 상태 / cold 스타트=초기 로드 포함, 목표 5초 이하).
 - 새/수정된 노트는 10초 이내에 재색인되어 검색 가능해야 한다.
@@ -31,12 +59,6 @@
 1. **초기 설정**
    - CLI 명령: `ovl init --vault <path> --provider openai --api-key <key>`  
    - 설정 파일: `~/.ovl/config.yaml` (볼트 경로, LLM 설정, 필터 규칙, 기본 K 값)
-   - **한글 출력 설정**: 에이전트가 태스크 진행 중 나오는 모든 설명글을 한글로 출력하려면 다음 방법들을 사용할 수 있습니다:
-     - 시스템 프롬프트에 명시: 8절에 정의된 System Prompt에 "모든 응답과 진행 상황 설명을 한국어로 작성하라"는 지시사항을 추가합니다. 설정 파일의 `system_prompt` 항목을 통해 커스터마이징 가능합니다.
-     - 설정 파일 옵션: `~/.ovl/config.yaml`에 `language: ko` 항목을 추가하여 출력 언어를 지정합니다.
-     - CLI 플래그: 명령 실행 시 `--language ko` 플래그를 사용합니다. 예: `ovl query "질문" --language ko`
-     - 환경 변수: `OVL_LANGUAGE=ko`를 설정하여 세션 전체에 적용합니다.
-     - 참고: 위 옵션들은 구현 단계에서 우선순위에 따라 일부만 적용될 수 있으며, 구현 시 일관된 동작을 보장하도록 설계합니다.
 2. **인덱싱/동기화**
    - 첫 실행 시 전체 스캔 → 문서 단위 → 헤더/문단 기준 chunking (기본 300~500 토큰)
    - 변경 감지: 파일 생성/수정/삭제 이벤트(watch) → 해당 파일만 재임베딩/삭제
