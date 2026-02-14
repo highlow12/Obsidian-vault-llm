@@ -2,6 +2,34 @@
 
 개발자가 바로 구현을 시작할 수 있도록 기능 명세와 기술 명세를 한 문서에 정리했습니다. Obsidian 볼트의 마크다운 노트를 LLM이 검색·요약·생성할 수 있도록 하는 로컬 우선(Local-first) 도구를 목표로 합니다.
 
+## GitHub Copilot 에이전트 한글 출력 설정
+
+GitHub Copilot 에이전트가 작업 중 모든 설명과 메시지를 한국어로 출력하도록 하려면:
+
+1. **`.github/copilot-instructions.md` 파일 생성**: 리포지토리 루트에 `.github` 디렉토리를 만들고 `copilot-instructions.md` 파일을 추가합니다.
+
+2. **한국어 출력 지시사항 추가**: 파일에 다음 내용을 작성합니다:
+   ```markdown
+   # Copilot Instructions
+   
+   - 모든 응답, 설명, 커밋 메시지를 한국어로 작성하세요.
+   - Write all responses, descriptions, and commit messages in Korean.
+   - 코드 작성 시 주석도 한국어로 작성하세요.
+   ```
+
+3. **Copilot 대화 시작 시 명시**: Copilot과 대화를 시작할 때 "한국어로 답변해 주세요" 또는 "Please respond in Korean"이라고 요청합니다.
+
+4. **워크스페이스 설정 파일 활용**: `.vscode/settings.json`에 다음을 추가할 수 있습니다:
+   ```json
+   {
+     "github.copilot.advanced": {
+       "language": "ko"
+     }
+   }
+   ```
+
+참고: GitHub Copilot의 언어 설정은 프롬프트 기반이므로, 대화 시작 시 명시적으로 한국어 사용을 요청하는 것이 가장 효과적입니다.
+
 ## 1. 목표와 성공 지표
 - 자연어로 볼트 내용을 질문하면 근거가 표시된 답변을 3초 이내에 제공한다 (Top-K 검색 + LLM 응답, warm 캐시=프로세스/벡터 스토어/LLM 커넥션이 이미 준비된 상태 / cold 스타트=초기 로드 포함, 목표 5초 이하).
 - 새/수정된 노트는 10초 이내에 재색인되어 검색 가능해야 한다.
