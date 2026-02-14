@@ -15,19 +15,23 @@ test("init는 필수 설정을 포함한 config 파일을 생성한다", () => {
   const tempHome = makeTempDir();
   const tempVault = makeTempDir();
 
-  process.env.HOME = tempHome;
-  const code = main(["init", "--vault", tempVault, "--provider", "openai"]);
+  try {
+    process.env.HOME = tempHome;
+    const code = main(["init", "--vault", tempVault, "--provider", "openai"]);
 
-  assert.equal(code, 0);
-  const configPath = path.join(tempHome, ".ovl", "config.yaml");
-  assert.equal(fs.existsSync(configPath), true);
+    assert.equal(code, 0);
+    const configPath = path.join(tempHome, ".ovl", "config.yaml");
+    assert.equal(fs.existsSync(configPath), true);
 
-  const content = fs.readFileSync(configPath, "utf-8");
-  assert.match(content, /vault_path: "/);
-  assert.match(content, /provider: "openai"/);
-  assert.match(content, /default_k: 8/);
-
-  process.env.HOME = originalHome;
+    const content = fs.readFileSync(configPath, "utf-8");
+    assert.match(content, /vault_path: "/);
+    assert.match(content, /provider: "openai"/);
+    assert.match(content, /default_k: 8/);
+  } finally {
+    process.env.HOME = originalHome;
+    fs.rmSync(tempHome, { recursive: true, force: true });
+    fs.rmSync(tempVault, { recursive: true, force: true });
+  }
 });
 
 test("init는 API 키 파일을 저장하고 참조를 config에 기록한다", () => {
@@ -35,26 +39,30 @@ test("init는 API 키 파일을 저장하고 참조를 config에 기록한다", 
   const tempHome = makeTempDir();
   const tempVault = makeTempDir();
 
-  process.env.HOME = tempHome;
-  const code = main([
-    "init",
-    "--vault",
-    tempVault,
-    "--provider",
-    "openai",
-    "--api-key",
-    "test-key"
-  ]);
+  try {
+    process.env.HOME = tempHome;
+    const code = main([
+      "init",
+      "--vault",
+      tempVault,
+      "--provider",
+      "openai",
+      "--api-key",
+      "test-key"
+    ]);
 
-  assert.equal(code, 0);
+    assert.equal(code, 0);
 
-  const keyPath = path.join(tempHome, ".ovl", "api_key.txt");
-  const configPath = path.join(tempHome, ".ovl", "config.yaml");
-  assert.equal(fs.existsSync(keyPath), true);
-  assert.equal(fs.readFileSync(keyPath, "utf-8").trim(), "test-key");
+    const keyPath = path.join(tempHome, ".ovl", "api_key.txt");
+    const configPath = path.join(tempHome, ".ovl", "config.yaml");
+    assert.equal(fs.existsSync(keyPath), true);
+    assert.equal(fs.readFileSync(keyPath, "utf-8").trim(), "test-key");
 
-  const configContent = fs.readFileSync(configPath, "utf-8");
-  assert.match(configContent, new RegExp(`api_key_ref: "file:${keyPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`));
-
-  process.env.HOME = originalHome;
+    const configContent = fs.readFileSync(configPath, "utf-8");
+    assert.match(configContent, new RegExp(`api_key_ref: "file:${keyPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`));
+  } finally {
+    process.env.HOME = originalHome;
+    fs.rmSync(tempHome, { recursive: true, force: true });
+    fs.rmSync(tempVault, { recursive: true, force: true });
+  }
 });

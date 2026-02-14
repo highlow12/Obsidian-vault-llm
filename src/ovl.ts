@@ -11,7 +11,8 @@ type InitOptions = {
 };
 
 function yamlQuote(value: string): string {
-  return `"${value.replace(/"/g, '\\"')}"`;
+  const escapedValue = value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  return `"${escapedValue}"`;
 }
 
 function buildConfig(vaultPath: string, provider: Provider, apiKeyRef?: string): string {
@@ -71,12 +72,16 @@ export function main(argv: string[] = process.argv.slice(2)): number {
 
   for (let i = 1; i < argv.length; i += 1) {
     const arg = argv[i];
+    const next = argv[i + 1];
+    if ((arg === "--vault" || arg === "--provider" || arg === "--api-key") && !next) {
+      return 1;
+    }
 
     if (arg === "--vault") {
-      vault = argv[i + 1];
+      vault = next;
       i += 1;
     } else if (arg === "--provider") {
-      const value = argv[i + 1] as Provider;
+      const value = next as Provider;
       if (value === "openai" || value === "local") {
         provider = value;
       } else {
@@ -84,7 +89,7 @@ export function main(argv: string[] = process.argv.slice(2)): number {
       }
       i += 1;
     } else if (arg === "--api-key") {
-      apiKey = argv[i + 1];
+      apiKey = next;
       i += 1;
     } else {
       return 1;
