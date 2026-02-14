@@ -31,6 +31,11 @@
 1. **초기 설정**
    - CLI 명령: `ovl init --vault <path> --provider openai --api-key <key>`  
    - 설정 파일: `~/.ovl/config.yaml` (볼트 경로, LLM 설정, 필터 규칙, 기본 K 값)
+   - **한글 출력 설정**: 에이전트가 태스크 진행 중 나오는 모든 설명글을 한글로 출력하려면:
+     - 시스템 프롬프트에 "모든 응답과 진행 상황 설명을 한국어로 작성하라"는 지시사항을 추가합니다.
+     - 설정 파일(`~/.ovl/config.yaml`)에 `language: ko` 또는 `output_language: korean` 항목을 추가하여 명시적으로 지정할 수 있습니다.
+     - 또는 CLI 명령 실행 시 `--language ko` 플래그를 사용할 수 있습니다: `ovl query "질문" --language ko`
+     - 환경 변수 `OVL_LANGUAGE=ko`를 설정하여 세션 전체에 적용할 수도 있습니다.
 2. **인덱싱/동기화**
    - 첫 실행 시 전체 스캔 → 문서 단위 → 헤더/문단 기준 chunking (기본 300~500 토큰)
    - 변경 감지: 파일 생성/수정/삭제 이벤트(watch) → 해당 파일만 재임베딩/삭제
