@@ -70,8 +70,18 @@ function getVaultPath(): string | undefined {
   }
   
   const content = fs.readFileSync(configPath, "utf-8");
-  const match = content.match(/vault_path:\s*"([^"]+)"/);
-  return match ? match[1].replace(/\\\\/g, "\\").replace(/\\"/g, '"') : undefined;
+  const match = content.match(/vault_path:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/);
+  if (!match) {
+    return undefined;
+  }
+  
+  // JSON.parse를 사용하여 이스케이프 시퀀스를 올바르게 처리
+  try {
+    return JSON.parse(`"${match[1]}"`);
+  } catch {
+    // 파싱 실패 시 원본 반환
+    return match[1];
+  }
 }
 
 type SaveConversationOptions = {
