@@ -123,11 +123,65 @@ GitHub Copilot 에이전트가 작업 중 모든 설명과 메시지를 한국�
 - **수동 테스트**: Obsidian 플러그인 UI와의 왕복, 응답 출처 정확도 샘플링
 
 ## 11. 초기 개발 우선순위(MVP)
-1) CLI 초기화/설정 저장  
+1) CLI 초기화/설정 저장 ✅
 2) 전체 색인 + 파일 변경 감시  
 3) 벡터 검색 + 근거 포함 QA  
-4) 챗 세션 유지 및 요약  
+4) 챗 세션 유지 및 요약 ✅ (대화 저장 기능)
 5) 노트 요약/새 노트 저장
+
+## 구현된 기능
+
+### 초기화 (`ovl init`)
+Obsidian 볼트를 설정하고 LLM 제공자를 구성합니다.
+
+```bash
+ovl init --vault /path/to/vault --provider openai --api-key YOUR_KEY
+```
+
+### 대화 저장 (`ovl save-conversation`)
+LLM과의 대화를 마크다운 형식으로 변환하여 볼트에 저장합니다.
+
+```bash
+# JSON 파일에서 대화를 읽어 마크다운으로 저장
+ovl save-conversation --session-id my-session --input conversation.json --output /path/to/vault
+```
+
+#### 입력 형식 (JSON)
+```json
+[
+  {
+    "role": "user",
+    "content": "질문 내용",
+    "timestamp": "2024-02-15T10:00:00Z"
+  },
+  {
+    "role": "assistant",
+    "content": "답변 내용",
+    "timestamp": "2024-02-15T10:00:05Z"
+  }
+]
+```
+
+#### 출력 형식 (Markdown)
+```markdown
+# 대화 기록 - my-session
+
+생성일: 2024-02-15T10:00:00.000Z
+
+---
+
+## 👤 사용자
+*2024-02-15T10:00:00Z*
+
+질문 내용
+
+## 🤖 어시스턴트
+*2024-02-15T10:00:05Z*
+
+답변 내용
+```
+
+파일명은 `YYYY-MM-DD-session-id.md` 형식으로 자동 생성됩니다.
 
 ## 12. 향후 로드맵(요약)
 - 오프라인 임베딩(로컬 모델) 옵션 추가  
