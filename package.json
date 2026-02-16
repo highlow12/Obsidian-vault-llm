@@ -8,9 +8,7 @@
     "dev": "node esbuild.config.mjs --watch",
     "test": "npm run build:cli && node --test dist/tests/*.test.js"
   },
-  "dependencies": {
-    "@google/genai": "^0.7.0"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@types/node": "^24.3.0",
     "esbuild": "^0.25.5",
