@@ -1,5 +1,21 @@
 # Obsidian Vault LLM – 통합 기능/기술 명세(PRD)
 
+## Obsidian 플러그인 실행
+
+이 저장소는 Obsidian 데스크톱용 플러그인으로 빌드할 수 있습니다.
+
+```bash
+npm install
+npm run build
+```
+
+생성되는 파일:
+- `main.js`
+- `manifest.json`
+- `styles.css`
+
+Obsidian의 플러그인 폴더에 위 파일을 복사하면 플러그인이 로드됩니다.
+
 개발자가 바로 구현을 시작할 수 있도록 기능 명세와 기술 명세를 한 문서에 정리했습니다. Obsidian 볼트의 마크다운 노트를 LLM이 검색·요약·생성할 수 있도록 하는 로컬 우선(Local-first) 도구를 목표로 합니다.
 
 ## GitHub Copilot 에이전트 한글 출력 설정

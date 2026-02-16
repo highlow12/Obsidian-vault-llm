@@ -1,0 +1,95 @@
+.ovl-chat-view {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	gap: 12px;
+	padding: 12px;
+}
+
+.ovl-chat-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+}
+
+.ovl-chat-title {
+	font-size: 1.1rem;
+	font-weight: 600;
+}
+
+.ovl-chat-session {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.ovl-chat-session input {
+	width: 180px;
+}
+
+.ovl-chat-controls {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.ovl-chat-messages {
+	flex: 1;
+	overflow-y: auto;
+	border: 1px solid var(--background-modifier-border);
+	padding: 8px;
+	border-radius: 8px;
+	background: var(--background-secondary);
+}
+
+.ovl-chat-message {
+	padding: 8px;
+	border-radius: 8px;
+	margin-bottom: 8px;
+	background: var(--background-primary);
+}
+
+.ovl-chat-message.ovl-chat-user {
+	border-left: 3px solid var(--color-accent);
+}
+
+.ovl-chat-message.ovl-chat-assistant {
+	border-left: 3px solid var(--color-base-40);
+}
+
+.ovl-chat-role {
+	font-size: 0.8rem;
+	opacity: 0.7;
+	margin-bottom: 4px;
+}
+
+.ovl-chat-content {
+	white-space: pre-wrap;
+}
+
+.ovl-chat-timestamp {
+	font-size: 0.75rem;
+	opacity: 0.6;
+	margin-top: 4px;
+}
+
+.ovl-chat-input {
+	display: flex;
+	gap: 8px;
+}
+
+.ovl-chat-input textarea {
+	flex: 1;
+	min-height: 80px;
+	resize: vertical;
+}
+
+.ovl-chat-input button {
+	align-self: flex-end;
+}
+
+.ovl-chat-busy {
+	opacity: 0.6;
+	pointer-events: none;
+}
