@@ -2,7 +2,7 @@
 
 import { MetadataStore } from "./metadataStore";
 import { VectorStore } from "./vectorStore";
-import { EmbeddingGenerator } from "./embeddings";
+import { EmbeddingGenerator, EmbeddingConfig } from "./embeddings";
 import { parseMarkdown, computeHash } from "./parser";
 import { chunkText } from "./chunker";
 import { IndexingConfig, NoteMetadata, Chunk } from "./types";
@@ -18,7 +18,15 @@ export class Indexer {
     this.config = config;
     this.metadataStore = new MetadataStore(config.metaDbPath);
     this.vectorStore = new VectorStore(config.vectorDbPath);
-    this.embeddingGenerator = new EmbeddingGenerator(config.embeddingModel);
+    
+    const embeddingConfig: EmbeddingConfig = {
+      provider: config.embeddingProvider,
+      model: config.embeddingModel,
+      apiKey: config.embeddingApiKey,
+      apiUrl: config.embeddingApiUrl,
+    };
+    
+    this.embeddingGenerator = new EmbeddingGenerator(embeddingConfig);
   }
 
   /**

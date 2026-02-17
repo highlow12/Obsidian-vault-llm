@@ -42,7 +42,10 @@ export interface IndexingConfig {
   chunkSize: number;
   chunkOverlap: number;
   topK: number;
+  embeddingProvider: "gemini" | "openai" | "local" | "custom";
   embeddingModel: string;
+  embeddingApiKey?: string;
+  embeddingApiUrl?: string;
   metaDbPath: string;
   vectorDbPath: string;
 }

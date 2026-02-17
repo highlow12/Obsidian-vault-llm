@@ -1,6 +1,6 @@
 import { Notice, Plugin, PluginSettingTab, Setting, requestUrl } from "obsidian";
-import type { ApiProvider, OvlSettings } from "./types";
-import { PROVIDER_PRESETS } from "./types";
+import type { ApiProvider, OvlSettings, EmbeddingProvider } from "./types";
+import { PROVIDER_PRESETS, EMBEDDING_PRESETS } from "./types";
 
 export type SettingsHost = Plugin & {
   settings: OvlSettings;
@@ -213,6 +213,62 @@ export class OvlSettingTab extends PluginSettingTab {
             }
           })
       );
+
+    containerEl.createEl("h3", { text: "임베딩 설정" });
+
+    let embeddingModelInput: { setValue: (value: string) => void } | null = null;
+
+    new Setting(containerEl)
+      .setName("임베딩 제공자")
+      .setDesc("임베딩 생성에 사용할 제공자를 선택하세요")
+      .addDropdown((dropdown) => {
+        dropdown
+          .addOptions({
+            gemini: "Google Gemini (API)",
+            openai: "OpenAI (API)",
+            local: "로컬 모델 (HuggingFace)",
+            custom: "커스텀 API"
+          })
+          .setValue(this.plugin.settings.embeddingProvider)
+          .onChange(async (value) => {
+            const provider = value as EmbeddingProvider;
+            this.plugin.settings.embeddingProvider = provider;
+            const preset = EMBEDDING_PRESETS[provider];
+            this.plugin.settings.embeddingModel = preset.model;
+            embeddingModelInput?.setValue(preset.model);
+            await this.plugin.saveSettings();
+            this.display();
+          });
+      });
+
+    if (this.plugin.settings.embeddingProvider !== "local") {
+      new Setting(containerEl)
+        .setName("임베딩 API 키")
+        .setDesc("임베딩 API 키 (비어있으면 LLM API 키 사용)")
+        .addText((text) =>
+          text
+            .setPlaceholder("선택")
+            .setValue(this.plugin.settings.embeddingApiKey)
+            .onChange(async (value) => {
+              this.plugin.settings.embeddingApiKey = value;
+              await this.plugin.saveSettings();
+            })
+        );
+    }
+
+    new Setting(containerEl)
+      .setName("임베딩 모델")
+      .setDesc("사용할 임베딩 모델")
+      .addText((text) => {
+        embeddingModelInput = text;
+        text
+          .setPlaceholder("모델명")
+          .setValue(this.plugin.settings.embeddingModel)
+          .onChange(async (value) => {
+            this.plugin.settings.embeddingModel = value.trim();
+            await this.plugin.saveSettings();
+          });
+      });
   }
 
   private async loadGeminiModels(): Promise<void> {

@@ -6,7 +6,7 @@ import { appendErrorLog } from "./logging";
 import { SaveConversationModal, SaveConversationForm } from "./modals/saveConversationModal";
 import { parseTurns } from "./parseTurns";
 import { OvlSettingTab } from "./settings";
-import { DEFAULT_SETTINGS, OvlSettings } from "./types";
+import { DEFAULT_SETTINGS, OvlSettings, EMBEDDING_PRESETS } from "./types";
 import { ChatView, VIEW_TYPE_OVL_CHAT } from "./views/chatView";
 import { Indexer } from "./indexing/indexer";
 import { VaultWatcher } from "./vaultWatcher";
@@ -102,7 +102,10 @@ export default class OvlPlugin extends Plugin {
         chunkSize: this.settings.chunkSize,
         chunkOverlap: this.settings.chunkOverlap,
         topK: this.settings.topK,
-        embeddingModel: "Xenova/all-MiniLM-L6-v2",
+        embeddingProvider: this.settings.embeddingProvider,
+        embeddingModel: this.settings.embeddingModel,
+        embeddingApiKey: this.settings.embeddingApiKey || this.settings.apiKey,
+        embeddingApiUrl: this.getEmbeddingApiUrl(),
         metaDbPath,
         vectorDbPath,
       });
@@ -260,5 +263,13 @@ export default class OvlPlugin extends Plugin {
       const message = error instanceof Error ? error.message : String(error);
       new Notice(`저장 실패: ${message}`);
     }
+  }
+
+  /**
+   * 임베딩 API URL 가져오기
+   */
+  private getEmbeddingApiUrl(): string | undefined {
+    const preset = EMBEDDING_PRESETS[this.settings.embeddingProvider];
+    return preset?.apiUrl;
   }
 }
