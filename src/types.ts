@@ -11,8 +11,8 @@ export type OvlSettings = {
 
 export const PROVIDER_PRESETS: Record<ApiProvider, { apiUrl: string; model: string }> = {
   gemini: {
-    apiUrl: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash:generateContent",
-    model: "gemini-3-flash"
+    apiUrl: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent",
+    model: "gemini-2.0-flash-exp"
   },
   openai: {
     apiUrl: "https://api.openai.com/v1/chat/completions",

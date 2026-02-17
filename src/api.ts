@@ -1,5 +1,4 @@
 import { requestUrl } from "obsidian";
-import { GoogleGenAI } from "@google/genai";
 import type { ConversationTurn } from "./conversation";
 import type { OvlSettings } from "./types";
 import { PROVIDER_PRESETS } from "./types";
@@ -125,22 +124,35 @@ export class OvlApiClient {
       };
     });
 
-    const payload = {
-      systemInstruction: systemPrompt ? { parts: [{ text: systemPrompt }] } : undefined,
+    const payload: {
+      systemInstruction?: { parts: Array<{ text: string }> };
+      contents: Array<{ role: string; parts: Array<{ text: string }> }>;
+      generationConfig: { responseMimeType: string };
+    } = {
       contents,
       generationConfig: {
         responseMimeType: "text/plain"
       }
     };
 
-    const ai = new GoogleGenAI({ apiKey });
-    let response:
-      | { text?: string; candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> }
-      | undefined;
+    if (systemPrompt) {
+      payload.systemInstruction = { parts: [{ text: systemPrompt }] };
+    }
+
+    // Gemini API URL 구성 (API 키를 쿼리 파라미터로 전달)
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json"
+    };
+
+    let response: { text: string; json?: unknown; status?: number };
     try {
-      response = await ai.models.generateContent({
-        model: modelName,
-        ...payload
+      response = await requestUrl({
+        url: apiUrl,
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload)
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -152,13 +164,29 @@ export class OvlApiClient {
       throw new Error(`Gemini 요청 실패: ${message}`);
     }
 
+    const status = response.status;
+    if (status && status >= 400) {
+      await this.log("gemini response error", {
+        model: modelName,
+        body: payload,
+        status,
+        response: response.text
+      });
+      throw new Error(`Gemini API 오류: ${status}`);
+    }
+
+    const data = this.parseJsonResponse(response.text, response.json);
     const text =
-      response?.text?.trim() ??
-      response?.candidates?.[0]?.content?.parts?.map((part) => part.text ?? "").join("").trim() ??
+      (data as { text?: string })?.text ??
+      (data as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> })
+        ?.candidates?.[0]?.content?.parts
+        ?.map((part) => part.text ?? "")
+        .join("")
+        .trim() ??
       "";
 
     if (!text) {
-      await this.log("gemini response invalid", { model: modelName, response });
+      await this.log("gemini response invalid", { model: modelName, response: data });
       throw new Error("응답 형식이 올바르지 않습니다.");
     }
 
