@@ -151,6 +151,68 @@ export class OvlSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           })
       );
+
+    containerEl.createEl("h3", { text: "인덱싱 및 검색 설정" });
+
+    new Setting(containerEl)
+      .setName("인덱싱 활성화")
+      .setDesc("볼트 파일을 인덱싱하여 벡터 검색을 활성화합니다.")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.indexingEnabled)
+          .onChange(async (value) => {
+            this.plugin.settings.indexingEnabled = value;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("청크 크기")
+      .setDesc("텍스트를 분할할 때 각 청크의 최대 토큰 수 (기본: 400)")
+      .addText((text) =>
+        text
+          .setPlaceholder("400")
+          .setValue(String(this.plugin.settings.chunkSize))
+          .onChange(async (value) => {
+            const num = parseInt(value);
+            if (!isNaN(num) && num > 0) {
+              this.plugin.settings.chunkSize = num;
+              await this.plugin.saveSettings();
+            }
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("청크 오버랩")
+      .setDesc("인접한 청크 간 중복되는 토큰 수 (기본: 50)")
+      .addText((text) =>
+        text
+          .setPlaceholder("50")
+          .setValue(String(this.plugin.settings.chunkOverlap))
+          .onChange(async (value) => {
+            const num = parseInt(value);
+            if (!isNaN(num) && num >= 0) {
+              this.plugin.settings.chunkOverlap = num;
+              await this.plugin.saveSettings();
+            }
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("검색 결과 수 (Top-K)")
+      .setDesc("검색 시 반환할 최대 결과 수 (기본: 8)")
+      .addText((text) =>
+        text
+          .setPlaceholder("8")
+          .setValue(String(this.plugin.settings.topK))
+          .onChange(async (value) => {
+            const num = parseInt(value);
+            if (!isNaN(num) && num > 0) {
+              this.plugin.settings.topK = num;
+              await this.plugin.saveSettings();
+            }
+          })
+      );
   }
 
   private async loadGeminiModels(): Promise<void> {

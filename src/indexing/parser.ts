@@ -1,6 +1,6 @@
 // 마크다운 파서 - frontmatter, 태그, 링크 추출
 
-import * as matter from "gray-matter";
+import matter from "gray-matter";
 import { createHash } from "crypto";
 
 export interface ParsedNote {

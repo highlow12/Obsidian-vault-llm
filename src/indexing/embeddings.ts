@@ -1,9 +1,9 @@
 // 임베딩 생성기 - HuggingFace Transformers 사용
 
-import { pipeline, Pipeline } from "@xenova/transformers";
+import { pipeline } from "@xenova/transformers";
 
 export class EmbeddingGenerator {
-  private pipeline: Pipeline | null = null;
+  private pipeline: any = null;
   private modelName: string;
 
   constructor(modelName: string = "Xenova/all-MiniLM-L6-v2") {

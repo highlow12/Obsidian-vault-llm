@@ -7,6 +7,11 @@ export type OvlSettings = {
   model: string;
   systemPrompt: string;
   defaultOutputFolder: string;
+  // 인덱싱 설정
+  indexingEnabled: boolean;
+  chunkSize: number;
+  chunkOverlap: number;
+  topK: number;
 };
 
 export const PROVIDER_PRESETS: Record<ApiProvider, { apiUrl: string; model: string }> = {
@@ -34,5 +39,10 @@ export const DEFAULT_SETTINGS: OvlSettings = {
   apiKey: "",
   model: PROVIDER_PRESETS.gemini.model,
   systemPrompt: "",
-  defaultOutputFolder: ""
+  defaultOutputFolder: "",
+  // 인덱싱 기본 설정
+  indexingEnabled: false,
+  chunkSize: 400,
+  chunkOverlap: 50,
+  topK: 8,
 };
