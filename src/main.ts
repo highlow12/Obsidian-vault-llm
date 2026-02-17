@@ -213,6 +213,13 @@ export default class OvlPlugin extends Plugin {
     return this.apiClient.requestAssistantReply(turns);
   }
 
+  public async requestTitleReply(prompt: string): Promise<string> {
+    if (!this.apiClient) {
+      throw new Error("API 클라이언트를 초기화할 수 없습니다.");
+    }
+    return this.apiClient.requestTitleReply(prompt);
+  }
+
   public async saveConversationFromTurns(
     sessionId: string,
     turns: ConversationTurn[],

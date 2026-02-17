@@ -27,21 +27,47 @@ export class OvlApiClient {
     return this.requestOpenAiCompatibleReply(settings, turns);
   }
 
+  async requestTitleReply(prompt: string): Promise<string> {
+    const settings = this.getSettings();
+    const titleModel = settings.titleModel.trim();
+    const modelName = titleModel || settings.model.trim();
+    const turns: ConversationTurn[] = [
+      {
+        role: "user",
+        content: prompt,
+        timestamp: new Date().toISOString()
+      }
+    ];
+
+    if (settings.provider === "gemini") {
+      return this.requestGeminiReply(settings, turns, {
+        modelName,
+        systemPrompt: ""
+      });
+    }
+
+    return this.requestOpenAiCompatibleReply(settings, turns, {
+      modelName,
+      systemPrompt: ""
+    });
+  }
+
   private async requestOpenAiCompatibleReply(
     settings: OvlSettings,
-    turns: ConversationTurn[]
+    turns: ConversationTurn[],
+    options?: { modelName?: string; systemPrompt?: string | null }
   ): Promise<string> {
     const apiUrl = settings.apiUrl.trim();
     if (!apiUrl) {
       throw new Error("API URL을 설정해 주세요.");
     }
 
-    const modelName = settings.model.trim() || PROVIDER_PRESETS.openai.model;
+    const modelName = options?.modelName?.trim() || settings.model.trim() || PROVIDER_PRESETS.openai.model;
     if (!modelName) {
       throw new Error("모델 이름을 입력해 주세요.");
     }
 
-    const messages = this.buildOpenAiMessages(settings, turns);
+    const messages = this.buildOpenAiMessages(settings, turns, options?.systemPrompt ?? null);
     const payload = {
       model: modelName,
       messages
@@ -102,19 +128,20 @@ export class OvlApiClient {
 
   private async requestGeminiReply(
     settings: OvlSettings,
-    turns: ConversationTurn[]
+    turns: ConversationTurn[],
+    options?: { modelName?: string; systemPrompt?: string | null }
   ): Promise<string> {
     const apiKey = settings.apiKey.trim();
     if (!apiKey) {
       throw new Error("Gemini API 키를 입력해 주세요.");
     }
 
-    const modelName = settings.model.trim() || PROVIDER_PRESETS.gemini.model;
+    const modelName = options?.modelName?.trim() || settings.model.trim() || PROVIDER_PRESETS.gemini.model;
     if (!modelName) {
       throw new Error("Gemini 모델 이름을 입력해 주세요.");
     }
 
-    const systemPrompt = settings.systemPrompt.trim();
+    const systemPrompt = (options?.systemPrompt ?? settings.systemPrompt).trim();
     const contents = turns.map((turn) => {
       const role = turn.role === "assistant" ? "model" : "user";
       const text = turn.role === "system" ? `[시스템] ${turn.content}` : turn.content;
@@ -195,10 +222,13 @@ export class OvlApiClient {
 
   private buildOpenAiMessages(
     settings: OvlSettings,
-    turns: ConversationTurn[]
+    turns: ConversationTurn[],
+    systemPromptOverride: string | null
   ): Array<{ role: string; content: string }> {
     const messages = [] as Array<{ role: string; content: string }>;
-    const systemPrompt = settings.systemPrompt.trim();
+    const systemPrompt = systemPromptOverride !== null
+      ? systemPromptOverride.trim()
+      : settings.systemPrompt.trim();
     if (systemPrompt) {
       messages.push({ role: "system", content: systemPrompt });
     }

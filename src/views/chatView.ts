@@ -1,4 +1,4 @@
-import { ItemView, Notice, WorkspaceLeaf } from "obsidian";
+import { ItemView, MarkdownRenderer, Notice, WorkspaceLeaf } from "obsidian";
 import type { ConversationTurn } from "../conversation";
 import type { PluginChatApi } from "../pluginApi";
 
@@ -41,7 +41,7 @@ export class ChatView extends ItemView {
     headerEl.createEl("div", { cls: "ovl-chat-title", text: "OVL 대화" });
 
     const sessionWrapEl = headerEl.createEl("div", { cls: "ovl-chat-session" });
-    sessionWrapEl.createEl("span", { text: "세션" });
+    sessionWrapEl.createEl("span", { text: "제목" });
     const sessionInputEl = sessionWrapEl.createEl("input", { type: "text" });
     sessionInputEl.value = this.buildSessionId();
     this.sessionIdEl = sessionInputEl;
@@ -121,7 +121,7 @@ export class ChatView extends ItemView {
     }
   }
 
-  private appendMessage(turn: ConversationTurn): void {
+  private async appendMessage(turn: ConversationTurn): Promise<void> {
     this.messages.push(turn);
     if (!this.messagesEl) {
       return;
@@ -134,10 +134,15 @@ export class ChatView extends ItemView {
       cls: "ovl-chat-role",
       text: this.getRoleLabel(turn.role)
     });
-    messageEl.createEl("div", {
-      cls: "ovl-chat-content",
-      text: turn.content
+    const contentEl = messageEl.createEl("div", {
+      cls: "ovl-chat-content markdown-preview-view markdown-rendered"
     });
+    try {
+      await MarkdownRenderer.renderMarkdown(turn.content, contentEl, "", this);
+    } catch (error) {
+      const fallback = error instanceof Error ? error.message : String(error);
+      contentEl.setText(`렌더링 실패: ${fallback}`);
+    }
     if (turn.timestamp) {
       const timestamp = typeof turn.timestamp === "string"
         ? turn.timestamp
@@ -168,13 +173,19 @@ export class ChatView extends ItemView {
       return;
     }
 
-    this.appendMessage({
+    const isFirstQuestion = this.messages.length === 0;
+
+    await this.appendMessage({
       role: "user",
       content: input,
       timestamp: new Date().toISOString()
     });
     if (this.inputEl) {
       this.inputEl.value = "";
+    }
+
+    if (isFirstQuestion) {
+      void this.generateSessionTitleFromQuestion(input);
     }
 
     this.setBusyState({ isBusy: true, sendLoading: true });
@@ -208,7 +219,7 @@ export class ChatView extends ItemView {
         reply = await this.plugin.requestAssistantReply(this.messages);
       }
 
-      this.appendMessage({
+      await this.appendMessage({
         role: "assistant",
         content: reply,
         timestamp: new Date().toISOString()
@@ -285,25 +296,31 @@ ${context}`;
       return;
     }
 
-    const sessionId = this.sessionIdEl?.value.trim() ?? "";
-    if (!sessionId) {
-      new Notice("세션 ID를 입력해 주세요.");
-      return;
-    }
-
     this.setBusyState({ isBusy: true, saveLoading: true });
     try {
+      const conversationTitle = await this.generateTitleForSave();
+      const sessionId = this.sessionIdEl?.value.trim() ?? "";
+      const finalSessionId = conversationTitle || sessionId;
+      if (!finalSessionId) {
+        new Notice("제목을 입력해 주세요.");
+        return;
+      }
+      if (conversationTitle && this.sessionIdEl) {
+        this.sessionIdEl.value = conversationTitle;
+      }
+
       const summaryPrompt = this.buildWikiSummaryPrompt(this.messages);
-      const summary = await this.plugin.requestAssistantReply([
+      let summary = await this.plugin.requestAssistantReply([
         {
           role: "user",
           content: summaryPrompt,
           timestamp: new Date().toISOString()
         }
       ]);
+      summary = this.cleanSummary(summary);
 
       const targetPath = await this.plugin.saveConversationFromTurns(
-        sessionId,
+        finalSessionId,
         [
           {
             role: "assistant",
@@ -347,12 +364,103 @@ ${context}`;
       })
       .join("\n\n");
 
-    return `다음 대화를 위키위키 스타일의 마크다운으로 정리해 주세요.\n\n` +
+    return `다음 대화를 위키 형식의 마크다운 본문으로 정리해 주세요.\n\n` +
+      `출력 형식(본문만):\n` +
+      `# 제목\n` +
+      `## 요약\n` +
+      `## 핵심 주제\n` +
+      `## 결정 사항\n` +
+      `## 액션 아이템\n` +
+      `## 열린 질문\n\n` +
       `요구사항:\n` +
-      `- 제목, 요약, 핵심 주제, 결정 사항, 액션 아이템, 열린 질문 섹션을 포함\n` +
-      `- 가능한 경우 목록과 표를 사용\n` +
+      `- 위 형식을 지켜서 구조적으로 작성\n` +
+      `- 가능한 경우 목록과 표 사용\n` +
       `- 한국어로 작성\n` +
-      `- 이모지를 최대한 사용하지 말 것\n\n` +
+      `- "어시스턴트"/타임스탬프/서문/설명/사족 없이 본문만 출력\n\n` +
       `대화 기록:\n${transcript}`;
+  }
+
+  private cleanSummary(summary: string): string {
+    const lines = summary.split("\n");
+    const cleaned = [] as string[];
+    let index = 0;
+
+    while (index < lines.length) {
+      const line = lines[index].trim();
+      if (line.startsWith("## 🤖") || line.startsWith("## 어시스턴트")) {
+        index += 1;
+        while (index < lines.length && lines[index].trim().startsWith("*")) {
+          index += 1;
+        }
+        while (index < lines.length && lines[index].trim() === "") {
+          index += 1;
+        }
+        continue;
+      }
+      if (line.startsWith("다음은 ") && line.includes("요약")) {
+        index += 1;
+        while (index < lines.length && lines[index].trim() === "") {
+          index += 1;
+        }
+        continue;
+      }
+      cleaned.push(lines[index]);
+      index += 1;
+    }
+
+    return cleaned.join("\n").trim();
+  }
+
+  private async generateSessionTitleFromQuestion(question: string): Promise<void> {
+    if (!this.sessionIdEl) {
+      return;
+    }
+
+    const prompt =
+      "다음 질문을 보고 세션 제목을 만들어 주세요. " +
+      "조건: 12~20자 내외의 간결한 제목, 이모지/따옴표 금지, 제목만 출력.\n\n" +
+      `질문: ${question}`;
+
+    try {
+      const title = await this.plugin.requestTitleReply(prompt);
+      const cleaned = this.cleanTitle(title);
+      if (cleaned) {
+        this.sessionIdEl.value = cleaned;
+      }
+    } catch (error) {
+      console.error("세션 제목 생성 실패:", error);
+    }
+  }
+
+  private async generateTitleForSave(): Promise<string> {
+    const transcript = this.messages
+      .map((turn) => {
+        const roleLabel =
+          turn.role === "user" ? "사용자" :
+          turn.role === "assistant" ? "어시스턴트" :
+          "시스템";
+        return `[${roleLabel}] ${turn.content}`;
+      })
+      .join("\n\n");
+
+    const prompt =
+      "다음 대화 내용을 보고 문장형 제목을 만들어 주세요. " +
+      "조건: 20~40자 내외, 이모지/따옴표 금지, 제목만 출력.\n\n" +
+      `대화:\n${transcript}`;
+
+    try {
+      const title = await this.plugin.requestTitleReply(prompt);
+      return this.cleanTitle(title);
+    } catch (error) {
+      console.error("저장용 제목 생성 실패:", error);
+      return "";
+    }
+  }
+
+  private cleanTitle(title: string): string {
+    return title
+      .replace(/["'`]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
   }
 }

@@ -65,7 +65,28 @@
 }
 
 .ovl-chat-content {
-	white-space: pre-wrap;
+	white-space: normal;
+}
+
+.ovl-chat-content :is(p, ul, ol, pre, blockquote, table) {
+	margin: 0 0 0.75em 0;
+}
+
+.ovl-chat-content :is(h1, h2, h3, h4, h5, h6) {
+	margin: 0.85em 0 0.5em 0;
+}
+
+.ovl-chat-content :is(pre, code) {
+	font-size: 0.9em;
+}
+
+.ovl-chat-content pre {
+	white-space: pre;
+	overflow-x: auto;
+}
+
+.ovl-chat-content :is(p, ul, ol, pre, blockquote, table, h1, h2, h3, h4, h5, h6):last-child {
+	margin-bottom: 0;
 }
 
 .ovl-chat-timestamp {

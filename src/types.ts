@@ -6,6 +6,7 @@ export type OvlSettings = {
   apiUrl: string;
   apiKey: string;
   model: string;
+  titleModel: string;
   systemPrompt: string;
   defaultOutputFolder: string;
   // 인덱싱 설정
@@ -60,6 +61,7 @@ export const DEFAULT_SETTINGS: OvlSettings = {
   apiUrl: PROVIDER_PRESETS.gemini.apiUrl,
   apiKey: "",
   model: PROVIDER_PRESETS.gemini.model,
+  titleModel: "",
   systemPrompt: "",
   defaultOutputFolder: "",
   // 인덱싱 기본 설정

@@ -32,8 +32,22 @@ export async function saveConversationFromTurns(
 }
 
 function buildFileName(conversation: Conversation): string {
-  const date = conversation.createdAt.toISOString().split("T")[0];
-  return `${date}-${conversation.sessionId}.md`;
+  const safeTitle = sanitizeFileSegment(conversation.sessionId);
+  return `${safeTitle}.md`;
+}
+
+function sanitizeFileSegment(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "untitled";
+  }
+
+  const cleaned = trimmed
+    .replace(/[\\/:*?"<>|]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return cleaned || "untitled";
 }
 
 async function ensureFolderExists(vault: Vault, folder: string): Promise<void> {

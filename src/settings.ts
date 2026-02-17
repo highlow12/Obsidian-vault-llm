@@ -127,6 +127,19 @@ export class OvlSettingTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
+      .setName("제목 생성 모델")
+      .setDesc("세션/저장 제목 생성에 사용할 모델 (비어있으면 기본 모델 사용)")
+      .addText((text) =>
+        text
+          .setPlaceholder("gpt-4o-mini")
+          .setValue(this.plugin.settings.titleModel)
+          .onChange(async (value) => {
+            this.plugin.settings.titleModel = value.trim();
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
       .setName("시스템 프롬프트")
       .setDesc("모든 요청에 포함될 시스템 메시지")
       .addTextArea((text) =>

@@ -5,6 +5,7 @@ import type { Chunk, NoteMetadata } from "./indexing/types";
 export type PluginChatApi = {
   settings: OvlSettings;
   requestAssistantReply: (turns: ConversationTurn[]) => Promise<string>;
+  requestTitleReply: (prompt: string) => Promise<string>;
   saveConversationFromTurns: (
     sessionId: string,
     turns: ConversationTurn[],
