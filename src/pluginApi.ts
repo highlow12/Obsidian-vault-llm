@@ -1,5 +1,6 @@
 import type { ConversationTurn } from "./conversation";
 import type { OvlSettings } from "./types";
+import type { Chunk, NoteMetadata } from "./indexing/types";
 
 export type PluginChatApi = {
   settings: OvlSettings;
@@ -9,4 +10,5 @@ export type PluginChatApi = {
     turns: ConversationTurn[],
     outputFolder: string
   ) => Promise<string>;
+  search: (query: string) => Promise<Array<{ chunk: Chunk; note: NoteMetadata; score: number }>>;
 };

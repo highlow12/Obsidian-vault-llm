@@ -10,7 +10,13 @@ const ctx = await esbuild.context({
   format: "cjs",
   target: "es2018",
   platform: "node",
-  external: ["obsidian"],
+  external: [
+    "obsidian",
+    "*.node",
+    "@xenova/transformers",
+    "sharp",
+    "onnxruntime-node"
+  ],
   sourcemap: "inline"
 });
 
