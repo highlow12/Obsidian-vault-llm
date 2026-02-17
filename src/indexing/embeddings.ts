@@ -10,6 +10,24 @@ export type EmbeddingConfig = {
   apiUrl?: string;
 };
 
+interface GeminiEmbeddingResponse {
+  embedding?: {
+    values?: number[];
+  };
+}
+
+interface OpenAIEmbeddingResponse {
+  data?: Array<{
+    embedding?: number[];
+  }>;
+}
+
+interface CustomEmbeddingResponse {
+  data?: Array<{
+    embedding?: number[];
+  }>;
+}
+
 export class EmbeddingGenerator {
   private pipeline: any = null;
   private config: EmbeddingConfig;
@@ -98,8 +116,8 @@ export class EmbeddingGenerator {
         }),
       });
 
-      const data = response.json as any;
-      if (data.embedding && data.embedding.values) {
+      const data = response.json as GeminiEmbeddingResponse;
+      if (data.embedding?.values) {
         return data.embedding.values;
       }
 
@@ -132,8 +150,8 @@ export class EmbeddingGenerator {
         }),
       });
 
-      const data = response.json as any;
-      if (data.data && data.data[0] && data.data[0].embedding) {
+      const data = response.json as OpenAIEmbeddingResponse;
+      if (data.data?.[0]?.embedding) {
         return data.data[0].embedding;
       }
 
@@ -171,10 +189,10 @@ export class EmbeddingGenerator {
         }),
       });
 
-      const data = response.json as any;
+      const data = response.json as CustomEmbeddingResponse | number[];
       
       // OpenAI 호환 형식
-      if (data.data && data.data[0] && data.data[0].embedding) {
+      if (!Array.isArray(data) && data.data?.[0]?.embedding) {
         return data.data[0].embedding;
       }
       
