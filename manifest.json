@@ -1,9 +1,9 @@
 {
   "id": "obsidian-vault-llm",
   "name": "Obsidian Vault LLM",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "minAppVersion": "1.5.0",
-  "description": "볼트 대화를 마크다운으로 저장하는 도우미 플러그인",
+  "description": "RAG 기반 볼트 검색 및 LLM 대화 플러그인",
   "author": "highlow12",
   "authorUrl": "https://github.com/highlow12",
   "isDesktopOnly": true
