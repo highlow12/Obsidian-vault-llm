@@ -118,6 +118,12 @@ export class VectorStore {
 
   /**
    * 벡터 검색 - Top-K 유사 청크 찾기
+   * 
+   * 참고: 현재 구현은 모든 임베딩을 메모리에 로드하여 선형 검색을 수행합니다.
+   * 대규모 볼트의 경우 성능이 저하될 수 있으며, 다음과 같은 개선이 권장됩니다:
+   * - ANN(Approximate Nearest Neighbor) 알고리즘 사용 (FAISS, HNSW 등)
+   * - 전용 벡터 데이터베이스 사용 (Chroma, Qdrant 등)
+   * - 증분 검색 또는 인덱스 캐싱
    */
   search(queryEmbedding: number[], k: number = 8): Array<{ chunkId: string; score: number }> {
     const allEmbeddings = this.getAllEmbeddings();

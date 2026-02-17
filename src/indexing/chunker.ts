@@ -5,12 +5,18 @@ import { Section } from "./parser";
 
 /**
  * 간단한 토큰 카운터 (공백 기준 근사치)
+ * 참고: 한글과 영어를 분리하여 카운트하여 이중 카운트 방지
  */
 function estimateTokenCount(text: string): number {
-  // 영어는 1단어 ≈ 1.3 토큰, 한글은 1음절 ≈ 1 토큰 근사
-  const words = text.split(/\s+/).length;
+  // 한글 문자 제거 후 영어/숫자 단어 카운트
+  const nonKoreanText = text.replace(/[가-힣]/g, " ");
+  const words = nonKoreanText.split(/\s+/).filter((w) => w.length > 0).length;
+  
+  // 한글 문자만 카운트
   const koreanChars = (text.match(/[가-힣]/g) || []).length;
-  return Math.ceil(words * 1.3 + koreanChars * 0.5);
+  
+  // 영어는 1단어 ≈ 1.3 토큰, 한글은 1음절 ≈ 1 토큰 근사
+  return Math.ceil(words * 1.3 + koreanChars);
 }
 
 /**
@@ -108,9 +114,11 @@ export function chunkText(
 
 /**
  * 텍스트를 문장으로 분할 (간단한 버전)
+ * 참고: 약어(Dr., Mr. 등)나 소수점에서 분할될 수 있음
  */
 function splitIntoSentences(text: string): string[] {
   // 마침표, 느낌표, 물음표 뒤 공백으로 분할
+  // 제한사항: 약어나 소수점에서 잘못 분할될 수 있음
   const sentences = text.split(/([.!?]\s+)/).filter((s) => s.trim());
   const result: string[] = [];
 

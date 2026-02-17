@@ -12,6 +12,10 @@ export class EmbeddingGenerator {
 
   /**
    * 임베딩 파이프라인 초기화
+   * 
+   * 참고: 이 메서드는 런타임에 ML 모델을 다운로드합니다.
+   * 모델은 HuggingFace에서 다운로드되며, 로컬 캐시에 저장됩니다.
+   * 보안: 모델 소스가 손상될 위험이 있으므로, 신뢰할 수 있는 모델만 사용하세요.
    */
   async initialize(): Promise<void> {
     if (this.pipeline) {
@@ -19,6 +23,7 @@ export class EmbeddingGenerator {
     }
 
     console.log(`임베딩 모델 로딩 중: ${this.modelName}`);
+    console.log(`모델은 HuggingFace에서 다운로드되어 로컬에 캐시됩니다.`);
     this.pipeline = await pipeline("feature-extraction", this.modelName);
     console.log("임베딩 모델 로딩 완료");
   }

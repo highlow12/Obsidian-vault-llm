@@ -8,6 +8,7 @@ export class VaultWatcher {
   private indexer: Indexer | null = null;
   private isIndexing: boolean = false;
   private indexQueue: Set<string> = new Set();
+  private indexingInProgress: Set<string> = new Set(); // 진행 중인 인덱싱 추적
 
   constructor(vault: Vault) {
     this.vault = vault;
@@ -98,8 +99,9 @@ export class VaultWatcher {
 
     // 100ms 후에 인덱싱 (연속 수정 방지)
     setTimeout(async () => {
-      if (this.indexQueue.has(file.path)) {
+      if (this.indexQueue.has(file.path) && !this.indexingInProgress.has(file.path)) {
         this.indexQueue.delete(file.path);
+        this.indexingInProgress.add(file.path);
 
         try {
           const content = await this.vault.read(file);
@@ -109,6 +111,8 @@ export class VaultWatcher {
           console.log(`파일 수정 인덱싱: ${file.path}`);
         } catch (error) {
           console.error(`파일 수정 인덱싱 실패: ${file.path}`, error);
+        } finally {
+          this.indexingInProgress.delete(file.path);
         }
       }
     }, 100);

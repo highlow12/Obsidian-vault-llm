@@ -178,7 +178,7 @@ export class ChatView extends ItemView {
       if (useRag && this.plugin.settings.indexingEnabled) {
         // RAG 사용: 검색 후 컨텍스트 추가
         try {
-          const searchResults = await (this.plugin as any).search(input);
+          const searchResults = await this.plugin.search(input);
           
           if (showSourcesOnly) {
             // 소스만 표시
