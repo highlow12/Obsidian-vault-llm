@@ -89,6 +89,38 @@
 	align-self: flex-end;
 }
 
+.ovl-chat-button {
+	position: relative;
+	min-width: 64px;
+}
+
+.ovl-chat-button.is-loading {
+	color: transparent;
+}
+
+.ovl-chat-button.is-loading::after {
+	content: "";
+	position: absolute;
+	top: 50%;
+	left: 50%;
+	width: 14px;
+	height: 14px;
+	margin: -7px 0 0 -7px;
+	border: 2px solid var(--text-muted);
+	border-top-color: var(--text-normal);
+	border-radius: 50%;
+	animation: ovl-spin 0.8s linear infinite;
+}
+
+@keyframes ovl-spin {
+	from {
+		transform: rotate(0deg);
+	}
+	to {
+		transform: rotate(360deg);
+	}
+}
+
 .ovl-chat-busy {
 	opacity: 0.6;
 	pointer-events: none;

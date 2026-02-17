@@ -62,7 +62,7 @@ export class ChatView extends ItemView {
     showSourcesLabel.appendText(" 소스만 보기");
     this.showSourcesCheckbox = showSourcesCheckbox;
 
-    const saveButtonEl = controlsEl.createEl("button", { text: "저장" });
+    const saveButtonEl = controlsEl.createEl("button", { text: "저장", cls: "ovl-chat-button" });
     saveButtonEl.addEventListener("click", () => {
       void this.handleSave();
     });
@@ -76,7 +76,7 @@ export class ChatView extends ItemView {
     textareaEl.placeholder = "메시지를 입력하세요. (Ctrl+Enter 전송)";
     this.inputEl = textareaEl;
 
-    const sendButtonEl = inputWrapEl.createEl("button", { text: "전송" });
+    const sendButtonEl = inputWrapEl.createEl("button", { text: "전송", cls: "ovl-chat-button" });
     sendButtonEl.addEventListener("click", () => {
       void this.handleSend();
     });
@@ -95,17 +95,26 @@ export class ChatView extends ItemView {
     return `session-${stamp}`;
   }
 
-  private setBusy(isBusy: boolean): void {
+  private setBusyState(state: {
+    isBusy: boolean;
+    sendLoading?: boolean;
+    saveLoading?: boolean;
+  }): void {
+    const sendLoading = state.sendLoading ?? false;
+    const saveLoading = state.saveLoading ?? false;
+
     if (this.sendButtonEl) {
-      this.sendButtonEl.disabled = isBusy;
+      this.sendButtonEl.disabled = state.isBusy;
+      this.sendButtonEl.classList.toggle("is-loading", sendLoading);
     }
     if (this.saveButtonEl) {
-      this.saveButtonEl.disabled = isBusy;
+      this.saveButtonEl.disabled = state.isBusy;
+      this.saveButtonEl.classList.toggle("is-loading", saveLoading);
     }
     if (this.inputEl) {
-      this.inputEl.disabled = isBusy;
+      this.inputEl.disabled = state.isBusy;
     }
-    if (isBusy) {
+    if (state.isBusy) {
       this.contentEl.addClass("ovl-chat-busy");
     } else {
       this.contentEl.removeClass("ovl-chat-busy");
@@ -168,7 +177,7 @@ export class ChatView extends ItemView {
       this.inputEl.value = "";
     }
 
-    this.setBusy(true);
+    this.setBusyState({ isBusy: true, sendLoading: true });
     try {
       const useRag = this.useRagCheckbox?.checked ?? false;
       const showSourcesOnly = this.showSourcesCheckbox?.checked ?? false;
@@ -208,7 +217,7 @@ export class ChatView extends ItemView {
       const message = error instanceof Error ? error.message : String(error);
       new Notice(`대화 실패: ${message}`);
     } finally {
-      this.setBusy(false);
+      this.setBusyState({ isBusy: false });
     }
   }
 
@@ -282,16 +291,68 @@ ${context}`;
       return;
     }
 
+    this.setBusyState({ isBusy: true, saveLoading: true });
     try {
+      const summaryPrompt = this.buildWikiSummaryPrompt(this.messages);
+      const summary = await this.plugin.requestAssistantReply([
+        {
+          role: "user",
+          content: summaryPrompt,
+          timestamp: new Date().toISOString()
+        }
+      ]);
+
       const targetPath = await this.plugin.saveConversationFromTurns(
         sessionId,
-        this.messages,
+        [
+          {
+            role: "assistant",
+            content: summary,
+            timestamp: new Date().toISOString()
+          }
+        ],
         this.plugin.settings.defaultOutputFolder
       );
-      new Notice(`대화 저장 완료: ${targetPath}`);
+      new Notice(`위키 요약 저장 완료: ${targetPath}`);
+      this.resetSession();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       new Notice(`저장 실패: ${message}`);
+    } finally {
+      this.setBusyState({ isBusy: false });
     }
+  }
+
+  private resetSession(): void {
+    this.messages = [];
+    if (this.messagesEl) {
+      this.messagesEl.empty();
+    }
+    if (this.inputEl) {
+      this.inputEl.value = "";
+    }
+    if (this.sessionIdEl) {
+      this.sessionIdEl.value = this.buildSessionId();
+    }
+  }
+
+  private buildWikiSummaryPrompt(turns: ConversationTurn[]): string {
+    const transcript = turns
+      .map((turn) => {
+        const roleLabel =
+          turn.role === "user" ? "사용자" :
+          turn.role === "assistant" ? "어시스턴트" :
+          "시스템";
+        return `[${roleLabel}] ${turn.content}`;
+      })
+      .join("\n\n");
+
+    return `다음 대화를 위키위키 스타일의 마크다운으로 정리해 주세요.\n\n` +
+      `요구사항:\n` +
+      `- 제목, 요약, 핵심 주제, 결정 사항, 액션 아이템, 열린 질문 섹션을 포함\n` +
+      `- 가능한 경우 목록과 표를 사용\n` +
+      `- 한국어로 작성\n` +
+      `- 이모지를 최대한 사용하지 말 것\n\n` +
+      `대화 기록:\n${transcript}`;
   }
 }
