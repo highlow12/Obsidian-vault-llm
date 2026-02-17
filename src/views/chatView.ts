@@ -1,6 +1,8 @@
 import { ItemView, MarkdownRenderer, Notice, WorkspaceLeaf } from "obsidian";
 import type { ConversationTurn } from "../conversation";
 import type { PluginChatApi } from "../pluginApi";
+import { TopicSeparationEngine } from "../topicSeparation";
+import { saveSegmentsAsNotes } from "../topicSeparation";
 
 export const VIEW_TYPE_OVL_CHAT = "ovl-chat-view";
 
@@ -309,6 +311,60 @@ ${context}`;
         this.sessionIdEl.value = conversationTitle;
       }
 
+      // 주제 분리 활성화 확인 (대화가 4턴 이상일 때만)
+      const enableTopicSeparation = this.messages.length >= 4 && this.plugin.settings.apiKey;
+
+      if (enableTopicSeparation) {
+        // 주제 분리 AI 사용
+        new Notice("대화를 주제별로 분석하는 중...");
+        
+        try {
+          const engine = new TopicSeparationEngine({
+            apiKey: this.plugin.settings.apiKey,
+            similarityThreshold: 0.75,
+            minSegmentLength: 2,
+            windowSize: 2,
+            enableKeywordMetadata: true
+          });
+
+          const result = await engine.separateTopics(this.messages);
+          
+          console.log(`주제 분리 완료: ${result.segments.length}개 세그먼트 감지`);
+
+          if (result.segments.length > 1) {
+            // 여러 주제로 분리됨
+            new Notice(`${result.segments.length}개의 주제로 분리되었습니다. 저장 중...`);
+
+            const multiNoteResult = await saveSegmentsAsNotes(
+              this.app.vault,
+              result.segments,
+              result.links,
+              finalSessionId,
+              this.plugin.settings.defaultOutputFolder
+            );
+
+            new Notice(
+              `주제별로 분리하여 저장 완료!\n` +
+              `- 주제 노트: ${multiNoteResult.notePaths.length}개\n` +
+              `- 인덱스: ${multiNoteResult.mainNotePath}`
+            );
+
+            engine.clearCache();
+            this.resetSession();
+            return;
+          } else {
+            // 단일 주제로 판단됨
+            console.log("단일 주제로 판단되어 일반 저장 수행");
+          }
+
+          engine.clearCache();
+        } catch (error) {
+          console.error("주제 분리 실패, 일반 저장으로 전환:", error);
+          new Notice("주제 분리 실패. 일반 방식으로 저장합니다.");
+        }
+      }
+
+      // 일반 저장 (기존 로직)
       const summaryPrompt = this.buildWikiSummaryPrompt(this.messages);
       let summary = await this.plugin.requestAssistantReply([
         {
