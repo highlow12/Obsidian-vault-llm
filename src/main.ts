@@ -223,6 +223,17 @@ export default class OvlPlugin extends Plugin {
 
   private async loadSettings(): Promise<void> {
     this.settings = { ...DEFAULT_SETTINGS, ...(await this.loadData()) };
+
+    let changed = false;
+    if (this.settings.embeddingProvider === "local") {
+      this.settings.embeddingProvider = "gemini";
+      this.settings.embeddingModel = EMBEDDING_PRESETS.gemini.model;
+      changed = true;
+    }
+
+    if (changed) {
+      await this.saveSettings();
+    }
   }
 
   public async saveSettings(): Promise<void> {

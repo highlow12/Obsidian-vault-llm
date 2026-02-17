@@ -1,6 +1,5 @@
 // 임베딩 생성기 - API 기반 및 로컬 모델 지원
 
-import { pipeline } from "@xenova/transformers";
 import { requestUrl } from "obsidian";
 
 export type EmbeddingConfig = {
@@ -30,6 +29,7 @@ interface CustomEmbeddingResponse {
 
 export class EmbeddingGenerator {
   private pipeline: any = null;
+  private pipelineFactory: ((task: string, model: string) => Promise<any>) | null = null;
   private config: EmbeddingConfig;
 
   constructor(config: EmbeddingConfig) {
@@ -47,7 +47,8 @@ export class EmbeddingGenerator {
 
       console.log(`로컬 임베딩 모델 로딩 중: ${this.config.model}`);
       console.log(`모델은 HuggingFace에서 다운로드되어 로컬에 캐시됩니다.`);
-      this.pipeline = await pipeline("feature-extraction", this.config.model);
+      const pipelineFactory = await this.loadPipelineFactory();
+      this.pipeline = await pipelineFactory("feature-extraction", this.config.model);
       console.log("임베딩 모델 로딩 완료");
     } else {
       // API 기반은 초기화 불필요
@@ -90,6 +91,19 @@ export class EmbeddingGenerator {
     });
 
     return Array.from(output.data as Float32Array);
+  }
+
+  /**
+   * 로컬 임베딩용 파이프라인 로더 (필요할 때만 로드)
+   */
+  private async loadPipelineFactory(): Promise<(task: string, model: string) => Promise<any>> {
+    if (this.pipelineFactory) {
+      return this.pipelineFactory;
+    }
+
+    const module = await import("@xenova/transformers");
+    this.pipelineFactory = module.pipeline as (task: string, model: string) => Promise<any>;
+    return this.pipelineFactory;
   }
 
   /**
