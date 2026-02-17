@@ -8,7 +8,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
  * 코사인 유사도를 계산합니다
  * @param vecA 벡터 A
  * @param vecB 벡터 B
- * @returns 코사인 유사도 (0~1)
+ * @returns 코사인 유사도 (-1~1)
  */
 export function cosineSimilarity(vecA: number[], vecB: number[]): number {
   if (vecA.length !== vecB.length) {

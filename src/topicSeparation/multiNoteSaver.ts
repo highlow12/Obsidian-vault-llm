@@ -44,7 +44,7 @@ export async function saveSegmentsAsNotes(
     const segmentTitle = await generateSegmentTitle(segment, baseTitle, i + 1);
     const markdown = generateSegmentMarkdown(segment, i, segments.length, links, notePaths);
 
-    const filename = sanitizeFileSegment(segmentTitle) + '.md';
+    const filename = sanitizeFilename(segmentTitle) + '.md';
     const targetPath = await ensureUniquePath(
       vault,
       normalizePath(cleanedFolder ? `${cleanedFolder}/${filename}` : filename)
@@ -209,7 +209,7 @@ async function createMainIndexNote(
   }
 
   const markdown = lines.join('\n');
-  const filename = sanitizeFileSegment(baseTitle) + '-인덱스.md';
+  const filename = sanitizeFilename(baseTitle) + '-인덱스.md';
   const targetPath = await ensureUniquePath(
     vault,
     normalizePath(folder ? `${folder}/${filename}` : filename)
@@ -222,7 +222,7 @@ async function createMainIndexNote(
 /**
  * 파일명을 안전하게 변환합니다
  */
-function sanitizeFileSegment(value: string): string {
+function sanitizeFilename(value: string): string {
   const trimmed = value.trim();
   if (!trimmed) {
     return 'untitled';

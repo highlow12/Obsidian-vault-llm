@@ -123,6 +123,7 @@ export class TopicSeparationEngine {
    * 여러 임베딩을 평균하여 하나로 결합합니다
    */
   private combineEmbeddings(embeddings: number[][]): number[] {
+    // 방어적 프로그래밍: 이론적으로 unreachable하지만 타입 안정성을 위해 유지
     if (embeddings.length === 0) {
       throw new Error('임베딩 배열이 비어있습니다');
     }

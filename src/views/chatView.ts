@@ -344,9 +344,7 @@ ${context}`;
             );
 
             new Notice(
-              `주제별로 분리하여 저장 완료!\n` +
-              `- 주제 노트: ${multiNoteResult.notePaths.length}개\n` +
-              `- 인덱스: ${multiNoteResult.mainNotePath}`
+              `주제별로 분리하여 저장 완료!\n- 주제 노트: ${multiNoteResult.notePaths.length}개\n- 인덱스: ${multiNoteResult.mainNotePath}`
             );
 
             engine.clearCache();
