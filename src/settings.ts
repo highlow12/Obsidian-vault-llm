@@ -5,6 +5,8 @@ import { PROVIDER_PRESETS, EMBEDDING_PRESETS } from "./types";
 export type SettingsHost = Plugin & {
   settings: OvlSettings;
   saveSettings: () => Promise<void>;
+  indexVaultAll: () => Promise<void>;
+  indexNewFilesOnly: () => Promise<void>;
 };
 
 export class OvlSettingTab extends PluginSettingTab {
@@ -178,6 +180,51 @@ export class OvlSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           })
       );
+
+    new Setting(containerEl)
+      .setName("전체 볼트 임베딩")
+      .setDesc("볼트의 모든 노트를 임베딩 및 인덱싱합니다. (시간이 걸릴 수 있음)")
+      .addButton((button) => {
+        button
+          .setButtonText("전체 임베딩 시작")
+          .setCta()
+          .onClick(async () => {
+            button.setDisabled(true);
+            button.setButtonText("진행 중...");
+            try {
+              await this.plugin.indexVaultAll();
+              new Notice("전체 임베딩 완료!");
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error);
+              new Notice(`임베딩 실패: ${message}`);
+            } finally {
+              button.setDisabled(false);
+              button.setButtonText("전체 임베딩 시작");
+            }
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("신규 노트만 임베딩")
+      .setDesc("마지막 인덱싱 이후 생성되거나 수정된 노트만 임베딩합니다.")
+      .addButton((button) => {
+        button
+          .setButtonText("신규 임베딩 시작")
+          .onClick(async () => {
+            button.setDisabled(true);
+            button.setButtonText("진행 중...");
+            try {
+              await this.plugin.indexNewFilesOnly();
+              new Notice("신규 임베딩 완료!");
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error);
+              new Notice(`임베딩 실패: ${message}`);
+            } finally {
+              button.setDisabled(false);
+              button.setButtonText("신규 임베딩 시작");
+            }
+          });
+      });
 
     new Setting(containerEl)
       .setName("청크 크기")

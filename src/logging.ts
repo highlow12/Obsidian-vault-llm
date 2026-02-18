@@ -21,7 +21,7 @@ export async function appendErrorLog(
     const exists = await app.vault.adapter.exists(logPath);
     if (exists) {
       const current = await app.vault.adapter.read(logPath);
-      await app.vault.adapter.write(logPath, `${current}${entry}`);
+      await app.vault.adapter.write(logPath, `${entry}${current}`);
     } else {
       await app.vault.adapter.write(logPath, entry.trimStart());
     }
@@ -45,8 +45,8 @@ export async function appendEmbeddingLog(
   const logPath = getPluginLogPath(app, manifest);
   const timestamp = new Date().toISOString();
   
-  // 입력 텍스트 (최대 150자)
-  const inputText = data.inputText.substring(0, 150).replace(/\n/g, ' ');
+  // 입력 텍스트 전체 (개행 제거)
+  const inputText = data.inputText.replace(/\n/g, ' ');
   
   // 임베딩 벡터를 간단히 표현
   const embeddingInfo = `[벡터 차원: ${data.embedding.length}]`;
@@ -64,7 +64,7 @@ export async function appendEmbeddingLog(
     const exists = await app.vault.adapter.exists(logPath);
     if (exists) {
       const current = await app.vault.adapter.read(logPath);
-      await app.vault.adapter.write(logPath, `${current}${entry}`);
+      await app.vault.adapter.write(logPath, `${entry}${current}`);
     } else {
       await app.vault.adapter.write(logPath, entry.trimStart());
     }
@@ -94,7 +94,7 @@ export async function appendTopicSeparationFailureLog(
     const exists = await app.vault.adapter.exists(logPath);
     if (exists) {
       const current = await app.vault.adapter.read(logPath);
-      await app.vault.adapter.write(logPath, `${current}${entry}`);
+      await app.vault.adapter.write(logPath, `${entry}${current}`);
     } else {
       await app.vault.adapter.write(logPath, entry.trimStart());
     }

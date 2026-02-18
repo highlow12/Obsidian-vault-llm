@@ -284,6 +284,73 @@ export default class OvlPlugin extends Plugin {
   }
 
   /**
+   * 전체 볼트를 임베딩합니다 (스캔 후 재인덱싱)
+   */
+  public async indexVaultAll(): Promise<void> {
+    if (!this.settings.indexingEnabled) {
+      throw new Error("인덱싱이 활성화되지 않았습니다");
+    }
+
+    if (!this.indexer) {
+      await this.initializeIndexing();
+    }
+
+    if (!this.vaultWatcher) {
+      throw new Error("인덱싱 시스템이 초기화되지 않았습니다");
+    }
+
+    try {
+      console.log("전체 볼트 임베딩 시작...");
+      await this.vaultWatcher.indexVault();
+      console.log("전체 볼트 임베딩 완료");
+    } catch (error) {
+      console.error("전체 임베딩 실패:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * 신규 노트만 임베딩합니다 (증분 인덱싱)
+   */
+  public async indexNewFilesOnly(): Promise<void> {
+    if (!this.settings.indexingEnabled) {
+      throw new Error("인덱싱이 활성화되지 않았습니다");
+    }
+
+    if (!this.indexer) {
+      await this.initializeIndexing();
+    }
+
+    if (!this.vaultWatcher) {
+      throw new Error("인덱싱 시스템이 초기화되지 않았습니다");
+    }
+
+    try {
+      console.log("신규 파일 임베딩 시작...");
+      
+      // 볼트의 모든 마크다운 파일 가져오기
+      const allFiles = this.app.vault.getMarkdownFiles();
+      let indexed = 0;
+
+      for (const file of allFiles) {
+        try {
+          const content = await this.app.vault.cachedRead(file);
+          // 각 파일을 인덱싱 (이미 인덱싱된 파일은 indexer에서 확인)
+          await this.indexer.indexFile(file.path, content);
+          indexed++;
+        } catch (error) {
+          console.warn(`파일 임베딩 실패: ${file.path}`, error);
+        }
+      }
+
+      console.log(`신규 파일 임베딩 완료: ${indexed}개 파일 처리`);
+    } catch (error) {
+      console.error("신규 임베딩 실패:", error);
+      throw error;
+    }
+  }
+
+  /**
    * 임베딩 API URL 가져오기
    */
   private getEmbeddingApiUrl(): string | undefined {

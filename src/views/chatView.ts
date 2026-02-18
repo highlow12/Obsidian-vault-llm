@@ -320,7 +320,8 @@ ${context}`;
         
         try {
           const engine = new TopicSeparationEngine({
-            apiKey: this.plugin.settings.apiKey,
+            apiKey: this.plugin.settings.embeddingApiKey || this.plugin.settings.apiKey,
+            embeddingModel: this.plugin.settings.embeddingModel,
             similarityThreshold: 0.75,
             minSegmentLength: 2,
             windowSize: 2,

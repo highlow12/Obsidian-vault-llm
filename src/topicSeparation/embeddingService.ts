@@ -47,13 +47,16 @@ export class EmbeddingGenerator {
 
   constructor(
     private apiKey: string,
+    private modelName: string = 'embedding-001',
     private app?: App,
     private manifest?: PluginManifest,
     private enableLogging: boolean = false
   ) {
     if (apiKey) {
       this.genAI = new GoogleGenerativeAI(apiKey);
-      this.model = this.genAI.getGenerativeModel({ model: 'embedding-001' });
+      // models/ 접두사 제거
+      const cleanModelName = this.modelName.replace(/^models\//, '');
+      this.model = this.genAI.getGenerativeModel({ model: cleanModelName });
     }
   }
 

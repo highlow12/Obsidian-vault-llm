@@ -13,6 +13,7 @@ import type { ConversationSegment, TopicBoundary, SegmentLink, TopicSeparationRe
 
 export interface TopicSeparationConfig {
   apiKey: string;
+  embeddingModel?: string; // 임베딩 모델 이름
   similarityThreshold?: number; // 기본값: 0.75
   minSegmentLength?: number; // 최소 세그먼트 길이 (턴 수)
   windowSize?: number; // 슬라이딩 윈도우 크기
@@ -37,6 +38,7 @@ export class TopicSeparationEngine {
     };
     this.embeddingGenerator = new EmbeddingGenerator(
       config.apiKey,
+      config.embeddingModel ?? 'embedding-001',
       config.app,
       config.manifest,
       config.enableEmbeddingLogging ?? false
@@ -147,22 +149,100 @@ export class TopicSeparationEngine {
   }
 
   /**
-   * 턴 텍스트를 준비합니다 (키워드 메타데이터 추가)
+   * 텍스트의 마지막 N개 문장을 추출합니다
+   */
+  private getLastNSentences(text: string, n: number = 3): string {
+    // 마침표, 느낌표, 물음표로 문장을 분리
+    const sentences = text.split(/([.!?]+)/).filter(s => s.trim().length > 0);
+    
+    // 문장 쌍으로 구성 (문장 + 구두점)
+    const sentenceList: string[] = [];
+    for (let i = 0; i < sentences.length; i += 2) {
+      if (i + 1 < sentences.length) {
+        sentenceList.push(sentences[i] + sentences[i + 1]);
+      } else if (i < sentences.length) {
+        sentenceList.push(sentences[i]);
+      }
+    }
+    
+    // 마지막 N개 문장 추출
+    const lastSentences = sentenceList.slice(-n);
+    return lastSentences.join(' ').trim();
+  }
+
+  /**
+   * 턴 텍스트를 준비합니다 (사용자 지정 형식)
+   * 임베딩 입력 = [현재 질문과 그 답변의 키워드] + 이전 assistant 마지막 2~3문장 + 현재 질문 + 현재 assistant 마지막 2~3문장
    */
   private prepareTurnTexts(turns: ConversationTurn[]): string[] {
-    return turns.map(turn => {
-      let text = turn.content;
-
-      if (this.config.enableKeywordMetadata) {
-        const keywords = extractKeywords(text);
-        const metadata = formatKeywordsMetadata(keywords);
-        if (metadata) {
-          text = `${metadata} ${text}`;
+    const result: string[] = [];
+    
+    for (let i = 0; i < turns.length; i++) {
+      const turn = turns[i];
+      let embeddingInput = '';
+      
+      // user-assistant 쌍을 이루도록 처리
+      if (turn.role === 'user') {
+        // 1. 현재 질문과 다음 답변(있다면)의 키워드 추출
+        let combinedText = turn.content;
+        let keywords: string[] = [];
+        
+        // 다음 턴이 assistant인지 확인
+        if (i + 1 < turns.length && turns[i + 1].role === 'assistant') {
+          const nextTurn = turns[i + 1];
+          combinedText += ' ' + nextTurn.content;
+          keywords = extractKeywords(combinedText);
+        } else {
+          keywords = extractKeywords(turn.content);
         }
+        
+        // 2. 이전 assistant 마지막 2~3문장 추출 (윈도우 오버랩)
+        let previousAssistantOverlap = '';
+        for (let j = i - 1; j >= 0; j--) {
+          if (turns[j].role === 'assistant') {
+            previousAssistantOverlap = this.getLastNSentences(turns[j].content, 3);
+            break;
+          }
+        }
+        
+        // 3. 현재 질문
+        const currentQuestion = turn.content;
+        
+        // 4. 현재 질문에 대한 assistant 답변의 마지막 2~3문장
+        let currentAssistantOverlap = '';
+        if (i + 1 < turns.length && turns[i + 1].role === 'assistant') {
+          currentAssistantOverlap = this.getLastNSentences(turns[i + 1].content, 3);
+        }
+        
+        // 모두 합치기
+        const keywordStr = keywords.length > 0 ? `[키워드: ${keywords.join(', ')}]` : '';
+        embeddingInput = [
+          keywordStr,
+          previousAssistantOverlap,
+          currentQuestion,
+          currentAssistantOverlap
+        ]
+          .filter(s => s.length > 0)
+          .join(' ');
+        
+        result.push(embeddingInput);
+        
+        // assistant 턴은 건너뛰기 (user 턴에서 이미 처리됨)
+        if (i + 1 < turns.length && turns[i + 1].role === 'assistant') {
+          i++;
+        }
+      } else if (turn.role === 'assistant' && (i === 0 || turns[i - 1].role !== 'user')) {
+        // user 쌍이 없는 독립적인 assistant 턴인 경우
+        const keywords = extractKeywords(turn.content);
+        const lastSentences = this.getLastNSentences(turn.content, 3);
+        const keywordStr = keywords.length > 0 ? `[키워드: ${keywords.join(', ')}]` : '';
+        
+        embeddingInput = [keywordStr, lastSentences].filter(s => s.length > 0).join(' ');
+        result.push(embeddingInput);
       }
-
-      return text;
-    });
+    }
+    
+    return result.length > 0 ? result : turns.map(t => t.content);
   }
 
   /**
