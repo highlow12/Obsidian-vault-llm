@@ -4,6 +4,7 @@ import { saveConversationFromTurns } from "./conversationStore";
 import { OvlApiClient } from "./api";
 import { appendErrorLog } from "./logging";
 import { SaveConversationModal, SaveConversationForm } from "./modals/saveConversationModal";
+import { IndexingProgressModal } from "./modals/indexingProgressModal";
 import { parseTurns } from "./parseTurns";
 import { OvlSettingTab } from "./settings";
 import { DEFAULT_SETTINGS, OvlSettings, EMBEDDING_PRESETS } from "./types";
@@ -174,11 +175,21 @@ export default class OvlPlugin extends Plugin {
       return;
     }
 
+    // 진행도 모달 표시
+    const progressModal = new IndexingProgressModal(this.app, () => {
+      // 취소 버튼 클릭 시
+      this.vaultWatcher?.cancelIndexing();
+    });
+    progressModal.open();
+
     try {
-      await this.vaultWatcher.indexVault();
+      await this.vaultWatcher.indexVault((progress) => {
+        progressModal.updateProgress(progress);
+      });
     } catch (error) {
       console.error("볼트 인덱싱 실패:", error);
       new Notice("볼트 인덱싱에 실패했습니다");
+      progressModal.close();
     }
   }
 

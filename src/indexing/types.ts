@@ -9,6 +9,7 @@ export interface NoteMetadata {
   frontmatter: Record<string, unknown>;
   updatedAt: number;
   hash: string;
+  modifiedAt?: number; // 파일시스템 수정 시간
 }
 
 export interface Chunk {
@@ -48,4 +49,12 @@ export interface IndexingConfig {
   embeddingApiUrl?: string;
   metaDbPath: string;
   vectorDbPath: string;
+}
+
+export interface IndexingProgress {
+  totalFiles: number;
+  processedFiles: number;
+  currentFile?: string;
+  status: "initializing" | "indexing" | "completed" | "error" | "cancelled";
+  error?: string;
 }

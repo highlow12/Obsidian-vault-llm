@@ -24,7 +24,8 @@ export class MetadataStore {
         links TEXT, -- JSON array
         frontmatter TEXT, -- JSON object
         updated_at INTEGER NOT NULL,
-        hash TEXT NOT NULL
+        hash TEXT NOT NULL,
+        modified_at INTEGER -- 파일시스템 수정 시간
       );
 
       CREATE TABLE IF NOT EXISTS chunks (
@@ -39,8 +40,31 @@ export class MetadataStore {
 
       CREATE INDEX IF NOT EXISTS idx_notes_path ON notes(path);
       CREATE INDEX IF NOT EXISTS idx_notes_updated_at ON notes(updated_at);
+      CREATE INDEX IF NOT EXISTS idx_notes_modified_at ON notes(modified_at);
       CREATE INDEX IF NOT EXISTS idx_chunks_note_id ON chunks(note_id);
     `);
+
+    // modified_at 컬럼이 없는 기존 DB를 마이그레이션
+    this.migrateIfNeeded();
+  }
+
+  /**
+   * 필요한 경우 스키마 마이그레이션
+   */
+  private migrateIfNeeded(): void {
+    try {
+      // modified_at 컬럼이 있는지 확인
+      const columns = this.db.pragma("table_info(notes)") as any[];
+      const hasModifiedAt = columns.some(col => col.name === "modified_at");
+      
+      if (!hasModifiedAt) {
+        console.log("modified_at 컬럼 추가 중...");
+        this.db.exec("ALTER TABLE notes ADD COLUMN modified_at INTEGER");
+        console.log("마이그레이션 완료");
+      }
+    } catch (error) {
+      console.error("스키마 마이그레이션 실패:", error);
+    }
   }
 
   /**
@@ -48,8 +72,8 @@ export class MetadataStore {
    */
   upsertNote(note: NoteMetadata): void {
     const stmt = this.db.prepare(`
-      INSERT INTO notes (id, path, title, tags, links, frontmatter, updated_at, hash)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO notes (id, path, title, tags, links, frontmatter, updated_at, hash, modified_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         path = excluded.path,
         title = excluded.title,
@@ -57,7 +81,8 @@ export class MetadataStore {
         links = excluded.links,
         frontmatter = excluded.frontmatter,
         updated_at = excluded.updated_at,
-        hash = excluded.hash
+        hash = excluded.hash,
+        modified_at = excluded.modified_at
     `);
 
     stmt.run(
@@ -68,7 +93,8 @@ export class MetadataStore {
       JSON.stringify(note.links),
       JSON.stringify(note.frontmatter),
       note.updatedAt,
-      note.hash
+      note.hash,
+      note.modifiedAt || null
     );
   }
 
@@ -187,6 +213,7 @@ export class MetadataStore {
       frontmatter: JSON.parse(row.frontmatter || "{}"),
       updatedAt: row.updated_at,
       hash: row.hash,
+      modifiedAt: row.modified_at || undefined,
     };
   }
 

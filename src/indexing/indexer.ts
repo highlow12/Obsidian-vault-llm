@@ -5,14 +5,17 @@ import { VectorStore } from "./vectorStore";
 import { EmbeddingGenerator, EmbeddingConfig } from "./embeddings";
 import { parseMarkdown, computeHash } from "./parser";
 import { chunkText } from "./chunker";
-import { IndexingConfig, NoteMetadata, Chunk } from "./types";
+import { IndexingConfig, NoteMetadata, Chunk, IndexingProgress } from "./types";
 import { createHash } from "crypto";
+
+export type ProgressCallback = (progress: IndexingProgress) => void;
 
 export class Indexer {
   private metadataStore: MetadataStore;
   private vectorStore: VectorStore;
   private embeddingGenerator: EmbeddingGenerator;
   private config: IndexingConfig;
+  private cancelled: boolean = false;
 
   constructor(config: IndexingConfig) {
     this.config = config;
@@ -37,18 +40,56 @@ export class Indexer {
   }
 
   /**
-   * 단일 파일 인덱싱
+   * 인덱싱 취소
    */
-  async indexFile(filePath: string, content: string): Promise<void> {
+  cancel(): void {
+    this.cancelled = true;
+  }
+
+  /**
+   * 취소 상태 리셋
+   */
+  resetCancel(): void {
+    this.cancelled = false;
+  }
+
+  /**
+   * 단일 파일 인덱싱 (파일 수정 시간 포함)
+   */
+  async indexFile(
+    filePath: string,
+    content: string,
+    modifiedAt?: number
+  ): Promise<void> {
     try {
+      // 취소 확인
+      if (this.cancelled) {
+        throw new Error("인덱싱이 취소되었습니다");
+      }
+
       // 파일 해시 계산
       const hash = computeHash(content);
 
       // 기존 노트 확인
       const existingNote = this.metadataStore.getNoteByPath(filePath);
-      if (existingNote && existingNote.hash === hash) {
-        console.log(`파일 변경 없음, 스킵: ${filePath}`);
-        return;
+      
+      // 변경 체크: 해시와 수정 시간 모두 확인
+      if (existingNote) {
+        // 해시가 같으면 스킵
+        if (existingNote.hash === hash) {
+          console.log(`파일 변경 없음 (해시), 스킵: ${filePath}`);
+          return;
+        }
+        
+        // modifiedAt이 있고 기존 값과 같으면 스킵
+        if (
+          modifiedAt &&
+          existingNote.modifiedAt &&
+          existingNote.modifiedAt === modifiedAt
+        ) {
+          console.log(`파일 변경 없음 (수정 시간), 스킵: ${filePath}`);
+          return;
+        }
       }
 
       // 마크다운 파싱
@@ -67,6 +108,7 @@ export class Indexer {
         frontmatter: parsed.frontmatter,
         updatedAt: Date.now(),
         hash,
+        modifiedAt,
       };
 
       this.metadataStore.upsertNote(noteMetadata);
@@ -95,12 +137,20 @@ export class Indexer {
       // 임베딩 생성 및 저장
       console.log(`임베딩 생성 중: ${filePath} (${chunks.length}개 청크)`);
       for (const chunk of chunks) {
+        // 취소 확인
+        if (this.cancelled) {
+          throw new Error("인덱싱이 취소되었습니다");
+        }
+
         const embedding = await this.embeddingGenerator.embed(chunk.text);
         this.vectorStore.storeEmbedding(chunk.id, embedding);
       }
 
       console.log(`인덱싱 완료: ${filePath}`);
     } catch (error) {
+      if (this.cancelled) {
+        throw error;
+      }
       console.error(`인덱싱 실패: ${filePath}`, error);
       throw error;
     }
@@ -109,7 +159,7 @@ export class Indexer {
   /**
    * 파일 삭제 처리
    */
-  deleteFile(filePath: string): void {
+  async deleteFile(filePath: string): Promise<void> {
     const note = this.metadataStore.getNoteByPath(filePath);
     if (!note) {
       return;

@@ -146,3 +146,65 @@
 	opacity: 0.6;
 	pointer-events: none;
 }
+
+/* 인덱싱 진행도 모달 스타일 */
+.indexing-progress-modal {
+	padding: 20px;
+	min-width: 400px;
+}
+
+.indexing-status {
+	font-size: 1rem;
+	font-weight: 500;
+	margin-bottom: 16px;
+	color: var(--text-normal);
+}
+
+.indexing-progress-container {
+	margin-bottom: 12px;
+}
+
+.indexing-progress-bg {
+	width: 100%;
+	height: 24px;
+	background: var(--background-modifier-border);
+	border-radius: 12px;
+	overflow: hidden;
+	position: relative;
+}
+
+.indexing-progress-bar {
+	height: 100%;
+	background: var(--interactive-accent);
+	transition: width 0.3s ease;
+	border-radius: 12px;
+}
+
+.indexing-progress-text {
+	text-align: center;
+	font-size: 0.85rem;
+	margin-top: 8px;
+	color: var(--text-muted);
+}
+
+.indexing-details {
+	font-size: 0.9rem;
+	color: var(--text-muted);
+	margin-bottom: 16px;
+	min-height: 20px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.indexing-button-container {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+	margin-top: 16px;
+}
+
+.indexing-button-container button {
+	padding: 6px 16px;
+}
+
