@@ -324,7 +324,10 @@ ${context}`;
             similarityThreshold: 0.75,
             minSegmentLength: 2,
             windowSize: 2,
-            enableKeywordMetadata: true
+            enableKeywordMetadata: true,
+            app: this.app,
+            manifest: this.plugin.manifest,
+            enableEmbeddingLogging: true
           });
 
           const result = await engine.separateTopics(this.messages);
@@ -340,7 +343,9 @@ ${context}`;
               result.segments,
               result.links,
               finalSessionId,
-              this.plugin.settings.defaultOutputFolder
+              this.plugin.settings.defaultOutputFolder,
+              this.app,
+              this.plugin.manifest
             );
 
             new Notice(

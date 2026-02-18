@@ -4,9 +4,11 @@
  * 대화의 의미론적 경계를 탐지하여 주제별로 분리합니다.
  */
 
+import type { App, PluginManifest } from 'obsidian';
 import type { ConversationTurn } from '../conversation';
 import { extractKeywords, formatKeywordsMetadata, extractCommonKeywords } from './keywordExtractor';
 import { EmbeddingGenerator, cosineSimilarity } from './embeddingService';
+import { appendTopicSeparationFailureLog } from '../logging';
 import type { ConversationSegment, TopicBoundary, SegmentLink, TopicSeparationResult } from './types';
 
 export interface TopicSeparationConfig {
@@ -15,6 +17,9 @@ export interface TopicSeparationConfig {
   minSegmentLength?: number; // 최소 세그먼트 길이 (턴 수)
   windowSize?: number; // 슬라이딩 윈도우 크기
   enableKeywordMetadata?: boolean; // 키워드 메타데이터 사용 여부
+  app?: App; // 로깅용 Obsidian 앱
+  manifest?: PluginManifest; // 플러그인 매니페스트
+  enableEmbeddingLogging?: boolean; // 임베딩 로깅 활성화
 }
 
 export class TopicSeparationEngine {
@@ -27,9 +32,15 @@ export class TopicSeparationEngine {
       similarityThreshold: config.similarityThreshold ?? 0.75,
       minSegmentLength: config.minSegmentLength ?? 2,
       windowSize: config.windowSize ?? 2,
-      enableKeywordMetadata: config.enableKeywordMetadata ?? true
+      enableKeywordMetadata: config.enableKeywordMetadata ?? true,
+      enableEmbeddingLogging: config.enableEmbeddingLogging ?? false
     };
-    this.embeddingGenerator = new EmbeddingGenerator(config.apiKey);
+    this.embeddingGenerator = new EmbeddingGenerator(
+      config.apiKey,
+      config.app,
+      config.manifest,
+      config.enableEmbeddingLogging ?? false
+    );
   }
 
   /**
@@ -38,42 +49,101 @@ export class TopicSeparationEngine {
    * @returns 주제 분리 결과
    */
   async separateTopics(turns: ConversationTurn[]): Promise<TopicSeparationResult> {
-    if (turns.length === 0) {
+    try {
+      if (turns.length === 0) {
+        return {
+          segments: [],
+          boundaries: [],
+          links: []
+        };
+      }
+
+      // 1. 각 턴의 텍스트 준비 (키워드 메타데이터 추가)
+      const turnTexts = this.prepareTurnTexts(turns);
+
+      // 2. 임베딩 생성
+      console.log('임베딩 생성 중...');
+      let embeddings: number[][];
+      try {
+        embeddings = await this.embeddingGenerator.embedBatch(turnTexts);
+      } catch (error) {
+        const msg = `임베딩 생성 실패: ${error instanceof Error ? error.message : String(error)}`;
+        if (this.config.app) {
+          await appendTopicSeparationFailureLog(this.config.app, this.config.manifest, msg, error);
+        }
+        throw new Error(msg);
+      }
+
+      // 3. 슬라이딩 윈도우로 유사도 계산
+      console.log('유사도 계산 중...');
+      let similarities: number[];
+      try {
+        similarities = this.calculateWindowSimilarities(embeddings);
+      } catch (error) {
+        const msg = `유사도 계산 실패: ${error instanceof Error ? error.message : String(error)}`;
+        if (this.config.app) {
+          await appendTopicSeparationFailureLog(this.config.app, this.config.manifest, msg, error);
+        }
+        throw new Error(msg);
+      }
+
+      // 4. 주제 경계 탐지
+      console.log('주제 경계 탐지 중...');
+      let boundaries: TopicBoundary[];
+      try {
+        boundaries = this.detectTopicBoundaries(similarities);
+      } catch (error) {
+        const msg = `주제 경계 탐지 실패: ${error instanceof Error ? error.message : String(error)}`;
+        if (this.config.app) {
+          await appendTopicSeparationFailureLog(this.config.app, this.config.manifest, msg, error);
+        }
+        throw new Error(msg);
+      }
+
+      // 5. 세그먼트 생성
+      console.log('세그먼트 생성 중...');
+      let segments: ConversationSegment[];
+      try {
+        segments = this.createSegments(turns, boundaries, similarities);
+      } catch (error) {
+        const msg = `세그먼트 생성 실패: ${error instanceof Error ? error.message : String(error)}`;
+        if (this.config.app) {
+          await appendTopicSeparationFailureLog(this.config.app, this.config.manifest, msg, error);
+        }
+        throw new Error(msg);
+      }
+
+      // 6. 세그먼트 간 링크 분석
+      console.log('세그먼트 링크 분석 중...');
+      let links: SegmentLink[];
+      try {
+        links = this.analyzeSegmentLinks(segments);
+      } catch (error) {
+        const msg = `세그먼트 링크 분석 실패: ${error instanceof Error ? error.message : String(error)}`;
+        if (this.config.app) {
+          await appendTopicSeparationFailureLog(this.config.app, this.config.manifest, msg, error);
+        }
+        throw new Error(msg);
+      }
+
       return {
-        segments: [],
-        boundaries: [],
-        links: []
+        segments,
+        boundaries,
+        links
       };
+    } catch (error) {
+      // 이미 로깅된 에러는 다시 로깅하지 않음
+      if (error instanceof Error && error.message.includes('실패:')) {
+        throw error;
+      }
+
+      // 예상치 못한 에러
+      const msg = `주제 분리 중 예상치 못한 오류: ${error instanceof Error ? error.message : String(error)}`;
+      if (this.config.app) {
+        await appendTopicSeparationFailureLog(this.config.app, this.config.manifest, msg, error);
+      }
+      throw new Error(msg);
     }
-
-    // 1. 각 턴의 텍스트 준비 (키워드 메타데이터 추가)
-    const turnTexts = this.prepareTurnTexts(turns);
-
-    // 2. 임베딩 생성
-    console.log('임베딩 생성 중...');
-    const embeddings = await this.embeddingGenerator.embedBatch(turnTexts);
-
-    // 3. 슬라이딩 윈도우로 유사도 계산
-    console.log('유사도 계산 중...');
-    const similarities = this.calculateWindowSimilarities(embeddings);
-
-    // 4. 주제 경계 탐지
-    console.log('주제 경계 탐지 중...');
-    const boundaries = this.detectTopicBoundaries(similarities);
-
-    // 5. 세그먼트 생성
-    console.log('세그먼트 생성 중...');
-    const segments = this.createSegments(turns, boundaries, similarities);
-
-    // 6. 세그먼트 간 링크 분석
-    console.log('세그먼트 링크 분석 중...');
-    const links = this.analyzeSegmentLinks(segments);
-
-    return {
-      segments,
-      boundaries,
-      links
-    };
   }
 
   /**

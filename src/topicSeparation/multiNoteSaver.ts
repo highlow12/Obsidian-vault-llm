@@ -4,7 +4,7 @@
  * 주제별로 분리된 대화를 여러 노트로 저장하고 링크로 연결합니다.
  */
 
-import type { Vault } from 'obsidian';
+import type { Vault, App, PluginManifest } from 'obsidian';
 import { normalizePath } from 'obsidian';
 import type { ConversationSegment, SegmentLink } from './types';
 import { convertToMarkdown } from '../conversation';
@@ -21,6 +21,8 @@ export interface MultiNoteSaveResult {
  * @param links 세그먼트 간 링크
  * @param baseTitle 기본 제목
  * @param outputFolder 저장 폴더
+ * @param app Obsidian 앱 인스턴스 (로깅용)
+ * @param manifest 플러그인 매니페스트 (로깅용)
  * @returns 저장된 노트 경로들
  */
 export async function saveSegmentsAsNotes(
@@ -28,7 +30,9 @@ export async function saveSegmentsAsNotes(
   segments: ConversationSegment[],
   links: SegmentLink[],
   baseTitle: string,
-  outputFolder: string
+  outputFolder: string,
+  app?: App,
+  manifest?: PluginManifest
 ): Promise<MultiNoteSaveResult> {
   const notePaths: string[] = [];
   const cleanedFolder = outputFolder ? normalizePath(outputFolder).replace(/^\/+/, '') : '';
