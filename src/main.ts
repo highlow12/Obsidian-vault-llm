@@ -347,7 +347,9 @@ export default class OvlPlugin extends Plugin {
         try {
           const content = await this.app.vault.cachedRead(file);
           // 각 파일을 인덱싱 (이미 인덱싱된 파일은 indexer에서 확인)
-          await this.indexer.indexFile(file.path, content);
+          if (this.indexer) {
+            await this.indexer.indexFile(file.path, content);
+          }
           indexed++;
         } catch (error) {
           console.warn(`파일 임베딩 실패: ${file.path}`, error);
