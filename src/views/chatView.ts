@@ -12,10 +12,9 @@ export class ChatView extends ItemView {
   private messagesEl: HTMLDivElement | null = null;
   private inputEl: HTMLTextAreaElement | null = null;
   private sendButtonEl: HTMLButtonElement | null = null;
+  private vaultSearchButtonEl: HTMLButtonElement | null = null;
   private saveButtonEl: HTMLButtonElement | null = null;
   private sessionIdEl: HTMLInputElement | null = null;
-  private useRagCheckbox: HTMLInputElement | null = null;
-  private showSourcesCheckbox: HTMLInputElement | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: PluginChatApi) {
     super(leaf);
@@ -49,20 +48,6 @@ export class ChatView extends ItemView {
     this.sessionIdEl = sessionInputEl;
 
     const controlsEl = headerEl.createEl("div", { cls: "ovl-chat-controls" });
-    
-    // RAG 옵션
-    const ragWrapEl = controlsEl.createEl("div", { cls: "ovl-rag-options" });
-    const useRagLabel = ragWrapEl.createEl("label");
-    const useRagCheckbox = useRagLabel.createEl("input", { type: "checkbox" });
-    useRagCheckbox.checked = true;
-    useRagLabel.appendText(" RAG 사용");
-    this.useRagCheckbox = useRagCheckbox;
-
-    const showSourcesLabel = ragWrapEl.createEl("label");
-    const showSourcesCheckbox = showSourcesLabel.createEl("input", { type: "checkbox" });
-    showSourcesCheckbox.checked = false;
-    showSourcesLabel.appendText(" 소스만 보기");
-    this.showSourcesCheckbox = showSourcesCheckbox;
 
     const saveButtonEl = controlsEl.createEl("button", { text: "저장", cls: "ovl-chat-button" });
     saveButtonEl.addEventListener("click", () => {
@@ -78,7 +63,15 @@ export class ChatView extends ItemView {
     textareaEl.placeholder = "메시지를 입력하세요. (Ctrl+Enter 전송)";
     this.inputEl = textareaEl;
 
-    const sendButtonEl = inputWrapEl.createEl("button", { text: "전송", cls: "ovl-chat-button" });
+    const buttonsEl = inputWrapEl.createEl("div", { cls: "ovl-chat-input-buttons" });
+
+    const vaultSearchButtonEl = buttonsEl.createEl("button", { text: "볼트 검색 답변", cls: "ovl-chat-button" });
+    vaultSearchButtonEl.addEventListener("click", () => {
+      void this.handleVaultSearch();
+    });
+    this.vaultSearchButtonEl = vaultSearchButtonEl;
+
+    const sendButtonEl = buttonsEl.createEl("button", { text: "전송", cls: "ovl-chat-button" });
     sendButtonEl.addEventListener("click", () => {
       void this.handleSend();
     });
@@ -108,6 +101,9 @@ export class ChatView extends ItemView {
     if (this.sendButtonEl) {
       this.sendButtonEl.disabled = state.isBusy;
       this.sendButtonEl.classList.toggle("is-loading", sendLoading);
+    }
+    if (this.vaultSearchButtonEl) {
+      this.vaultSearchButtonEl.disabled = state.isBusy;
     }
     if (this.saveButtonEl) {
       this.saveButtonEl.disabled = state.isBusy;
@@ -169,57 +165,14 @@ export class ChatView extends ItemView {
   }
 
   private async handleSend(): Promise<void> {
-    const input = this.inputEl?.value.trim() ?? "";
-    if (!input) {
-      new Notice("메시지를 입력해 주세요.");
+    const input = await this.prepareUserInput();
+    if (input === null) {
       return;
-    }
-
-    const isFirstQuestion = this.messages.length === 0;
-
-    await this.appendMessage({
-      role: "user",
-      content: input,
-      timestamp: new Date().toISOString()
-    });
-    if (this.inputEl) {
-      this.inputEl.value = "";
-    }
-
-    if (isFirstQuestion) {
-      void this.generateSessionTitleFromQuestion(input);
     }
 
     this.setBusyState({ isBusy: true, sendLoading: true });
     try {
-      const useRag = this.useRagCheckbox?.checked ?? false;
-      const showSourcesOnly = this.showSourcesCheckbox?.checked ?? false;
-
-      let reply: string;
-
-      if (useRag && this.plugin.settings.indexingEnabled) {
-        // RAG 사용: 검색 후 컨텍스트 추가
-        try {
-          const searchResults = await this.plugin.search(input);
-          
-          if (showSourcesOnly) {
-            // 소스만 표시
-            reply = this.formatSearchResults(searchResults);
-          } else {
-            // 검색 결과를 컨텍스트로 LLM에 전달
-            const context = this.buildContext(searchResults);
-            const enhancedMessages = this.buildEnhancedMessages(input, context);
-            reply = await this.plugin.requestAssistantReply(enhancedMessages);
-          }
-        } catch (error) {
-          console.error("RAG 검색 실패:", error);
-          new Notice("검색에 실패하여 일반 모드로 전환합니다");
-          reply = await this.plugin.requestAssistantReply(this.messages);
-        }
-      } else {
-        // 일반 모드
-        reply = await this.plugin.requestAssistantReply(this.messages);
-      }
+      const reply = await this.plugin.requestAssistantReply(this.messages);
 
       await this.appendMessage({
         role: "assistant",
@@ -236,7 +189,7 @@ export class ChatView extends ItemView {
 
   private buildContext(searchResults: any[]): string {
     if (searchResults.length === 0) {
-      return "관련 문서를 찾을 수 없습니다.";
+      return "";
     }
 
     let context = "다음은 검색된 관련 문서들입니다:\n\n";
@@ -254,6 +207,77 @@ export class ChatView extends ItemView {
     }
 
     return context;
+  }
+
+  private async handleVaultSearch(): Promise<void> {
+    const input = await this.prepareUserInput();
+    if (input === null) {
+      return;
+    }
+
+    this.setBusyState({ isBusy: true, sendLoading: true });
+    try {
+      let reply: string;
+
+      if (this.plugin.settings.indexingEnabled) {
+        try {
+          const searchResults = await this.plugin.search(input);
+
+          if (searchResults.length > 0) {
+            // 유사한 노트가 있는 경우: 컨텍스트와 함께 LLM에 전달
+            const context = this.buildContext(searchResults);
+            const enhancedMessages = this.buildEnhancedMessages(input, context);
+            reply = await this.plugin.requestAssistantReply(enhancedMessages);
+          } else {
+            // 유사한 노트가 없는 경우: 일반 모드로 답변
+            new Notice("유사한 노트를 찾지 못했습니다. 일반 모드로 답변합니다.");
+            reply = await this.plugin.requestAssistantReply(this.messages);
+          }
+        } catch (error) {
+          console.error("RAG 검색 실패:", error);
+          new Notice("검색에 실패하여 일반 모드로 전환합니다");
+          reply = await this.plugin.requestAssistantReply(this.messages);
+        }
+      } else {
+        reply = await this.plugin.requestAssistantReply(this.messages);
+      }
+
+      await this.appendMessage({
+        role: "assistant",
+        content: reply,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      new Notice(`대화 실패: ${message}`);
+    } finally {
+      this.setBusyState({ isBusy: false });
+    }
+  }
+
+  private async prepareUserInput(): Promise<string | null> {
+    const input = this.inputEl?.value.trim() ?? "";
+    if (!input) {
+      new Notice("메시지를 입력해 주세요.");
+      return null;
+    }
+
+    const isFirstQuestion = this.messages.length === 0;
+
+    await this.appendMessage({
+      role: "user",
+      content: input,
+      timestamp: new Date().toISOString()
+    });
+    if (this.inputEl) {
+      this.inputEl.value = "";
+    }
+
+    if (isFirstQuestion) {
+      void this.generateSessionTitleFromQuestion(input);
+    }
+
+    return input;
   }
 
   private formatSearchResults(searchResults: any[]): string {

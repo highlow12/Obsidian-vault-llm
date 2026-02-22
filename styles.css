@@ -110,6 +110,13 @@
 	align-self: flex-end;
 }
 
+.ovl-chat-input-buttons {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	align-self: flex-end;
+}
+
 .ovl-chat-button {
 	position: relative;
 	min-width: 64px;
