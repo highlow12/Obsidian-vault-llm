@@ -1,8 +1,6 @@
 import { ItemView, MarkdownRenderer, Notice, WorkspaceLeaf } from "obsidian";
 import type { AssistantGenerationLog, ConversationTurn } from "../conversation";
 import type { AssistantTokenUsage, PluginChatApi } from "../pluginApi";
-import { TopicSeparationEngine } from "../topicSeparation";
-import { saveSegmentsAsNotes } from "../topicSeparation";
 
 export const VIEW_TYPE_OVL_CHAT = "ovl-chat-view";
 
@@ -670,95 +668,58 @@ ${context}`;
         this.sessionIdEl.value = conversationTitle;
       }
 
-      // 주제 분리 활성화 확인 (대화가 4턴 이상일 때만)
-      const enableTopicSeparation = this.messages.length >= 4 && this.plugin.settings.apiKey;
+      new Notice("대화를 주제별로 분석하는 중...");
 
-      if (enableTopicSeparation) {
-        // 주제 분리 AI 사용
-        new Notice("대화를 주제별로 분석하는 중...");
-        
-        try {
-          const engine = new TopicSeparationEngine({
-            apiKey: this.plugin.settings.embeddingApiKey || this.plugin.settings.apiKey,
-            embeddingModel: this.plugin.settings.embeddingModel,
-            similarityThreshold: this.plugin.settings.saveSimilarityThreshold,
-            minSegmentLength: 2,
-            windowSize: 2,
-            enableKeywordMetadata: true,
-            app: this.app,
-            manifest: this.plugin.manifest,
-            enableEmbeddingLogging: true
-          });
+      // 단일 LLM 호출로 주제 분리 및 문서 생성
+      const topicDocs = await this.separateTopicsWithLLM(this.messages);
 
-          const result = await engine.separateTopics(this.messages);
-          
-          console.log(`주제 분리 완료: ${result.segments.length}개 세그먼트 감지`);
-
-          if (result.segments.length > 1) {
-            // 여러 주제로 분리됨
-            new Notice(`${result.segments.length}개의 주제로 분리되었습니다. 저장 중...`);
-
-            const multiNoteResult = await saveSegmentsAsNotes(
-              this.app.vault,
-              result.segments,
-              result.links,
-              finalSessionId,
-              this.plugin.settings.defaultOutputFolder,
-              this.app,
-              this.plugin.manifest
-            );
-
-            new Notice(
-              `주제별로 분리하여 저장 완료!\n- 주제 노트: ${multiNoteResult.notePaths.length}개\n- 인덱스: ${multiNoteResult.mainNotePath}`
-            );
-
-            engine.clearCache();
-            this.resetSession();
-            return;
-          } else {
-            // 단일 주제로 판단됨
-            console.log("단일 주제로 판단되어 일반 저장 수행");
-          }
-
-          engine.clearCache();
-        } catch (error) {
-          console.error("주제 분리 실패, 일반 저장으로 전환:", error);
-          new Notice("주제 분리 실패. 일반 방식으로 저장합니다.");
+      if (topicDocs.length > 1) {
+        // 여러 주제로 분리됨
+        for (let topicIndex = 0; topicIndex < topicDocs.length; topicIndex++) {
+          const doc = topicDocs[topicIndex];
+          const docTitle = `${finalSessionId} - ${topicIndex + 1}. ${doc.title}`;
+          await this.plugin.saveConversationFromTurns(
+            docTitle,
+            [{ role: "assistant", content: doc.content, timestamp: new Date().toISOString() }],
+            this.plugin.settings.defaultOutputFolder
+          );
         }
+        new Notice(`${topicDocs.length}개의 주제로 분리하여 저장 완료!`);
+        this.resetSession();
+        return;
       }
 
-      // 일반 저장 (기존 로직)
+      if (topicDocs.length === 1) {
+        // 단일 주제
+        const targetPath = await this.plugin.saveConversationFromTurns(
+          finalSessionId,
+          [{ role: "assistant", content: topicDocs[0].content, timestamp: new Date().toISOString() }],
+          this.plugin.settings.defaultOutputFolder
+        );
+        new Notice(`저장 완료: ${targetPath}`);
+        this.resetSession();
+        return;
+      }
+
+      // LLM 응답 파싱 실패 시 기존 위키 요약 방식으로 폴백
+      new Notice("주제 분리 실패. 일반 방식으로 저장합니다.");
       const summaryPrompt = this.buildWikiSummaryPrompt(this.messages);
       let summary = await this.plugin.requestAssistantReply([
-        {
-          role: "user",
-          content: summaryPrompt,
-          timestamp: new Date().toISOString()
-        }
+        { role: "user", content: summaryPrompt, timestamp: new Date().toISOString() }
       ]);
       summary = this.cleanSummary(summary);
 
       if (this.isSummaryTooShort(summary)) {
         const retryPrompt = this.buildWikiSummaryPrompt(this.messages, true);
         summary = await this.plugin.requestAssistantReply([
-          {
-            role: "user",
-            content: retryPrompt,
-            timestamp: new Date().toISOString()
-          }
+          { role: "user", content: retryPrompt, timestamp: new Date().toISOString() }
         ]);
         summary = this.cleanSummary(summary);
       }
 
       const targetPath = await this.plugin.saveConversationFromTurns(
         finalSessionId,
-        [
-          {
-            role: "assistant",
-            content: summary,
-            timestamp: new Date().toISOString()
-          }
-        ],
+        [{ role: "assistant", content: summary, timestamp: new Date().toISOString() }],
         this.plugin.settings.defaultOutputFolder
       );
       new Notice(`위키 요약 저장 완료: ${targetPath}`);
@@ -1032,6 +993,66 @@ ${context}`;
       console.error("저장용 제목 생성 실패:", error);
       return "";
     }
+  }
+
+  private async separateTopicsWithLLM(
+    turns: ConversationTurn[]
+  ): Promise<Array<{ title: string; content: string }>> {
+    const transcript = turns
+      .map((turn) => {
+        const roleLabel =
+          turn.role === "user" ? "사용자" :
+          turn.role === "assistant" ? "어시스턴트" :
+          "시스템";
+        return `[${roleLabel}] ${turn.content}`;
+      })
+      .join("\n\n");
+
+    const prompt =
+      `다음 대화를 주제별로 분리하고 각 주제에 대한 위키 문서를 작성해 주세요.\n\n` +
+      `요구사항:\n` +
+      `- 대화의 주요 주제들을 파악하여 분리\n` +
+      `- 주제가 하나뿐이면 하나의 문서만 작성\n` +
+      `- 각 주제별로 맥락, 근거, 결론, 후속 과제를 포함한 위키 형식 문서 작성\n` +
+      `- 반드시 JSON 배열 형식으로만 응답 (다른 텍스트 없이)\n` +
+      `- 형식: [{"title": "주제 제목", "content": "마크다운 내용"}, ...]\n` +
+      `- title: 20자 이내의 간결한 제목, content: 위키 형식 마크다운, 한국어\n\n` +
+      `대화:\n${transcript}\n\n` +
+      `JSON만 출력 (코드블록 없이):`;
+
+    let topicSeparationResponse: string;
+    try {
+      topicSeparationResponse = await this.plugin.requestAssistantReply([
+        { role: "user", content: prompt, timestamp: new Date().toISOString() }
+      ]);
+    } catch (error) {
+      console.error("LLM 주제 분리 요청 실패:", error);
+      return [];
+    }
+
+    try {
+      let jsonStr = topicSeparationResponse.trim();
+      // 코드블록 제거
+      jsonStr = jsonStr.replace(/^```(?:json)?\s*|\s*```$/gi, "");
+      const parsed = JSON.parse(jsonStr) as unknown;
+      if (
+        Array.isArray(parsed) &&
+        parsed.length > 0 &&
+        parsed.every(
+          (item): item is { title: string; content: string } =>
+            typeof item === "object" &&
+            item !== null &&
+            typeof (item as Record<string, unknown>).title === "string" &&
+            typeof (item as Record<string, unknown>).content === "string"
+        )
+      ) {
+        return parsed;
+      }
+    } catch (error) {
+      console.error("LLM 주제 분리 응답 파싱 실패:", error, topicSeparationResponse);
+    }
+
+    return [];
   }
 
   private cleanTitle(title: string): string {
