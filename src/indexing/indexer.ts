@@ -178,6 +178,42 @@ export class Indexer {
   }
 
   /**
+   * 키워드 기반 검색 (인덱싱된 청크에서 키워드 매칭)
+   * @param keywordQuery "keyword1 OR keyword2" 형식의 키워드 쿼리
+   */
+  keywordSearch(keywordQuery: string, k?: number): Array<{ chunk: Chunk; score: number }> {
+    const topK = k || this.config.topK;
+
+    // "keyword1 OR keyword2" 형식에서 개별 키워드 추출 (OR 주변 공백 허용)
+    const keywords = keywordQuery
+      .split(/\s*OR\s*/i)
+      .map((kw) => kw.trim().toLowerCase())
+      .filter((kw) => kw.length > 0);
+
+    if (keywords.length === 0) {
+      return [];
+    }
+
+    const chunks = this.metadataStore.getAllChunks();
+    const results: Array<{ chunk: Chunk; score: number }> = [];
+
+    for (const chunk of chunks) {
+      const text = chunk.text.toLowerCase();
+      let matchCount = 0;
+      for (const keyword of keywords) {
+        if (text.includes(keyword)) {
+          matchCount++;
+        }
+      }
+      if (matchCount > 0) {
+        results.push({ chunk, score: matchCount / keywords.length });
+      }
+    }
+
+    return results.sort((a, b) => b.score - a.score).slice(0, topK);
+  }
+
+  /**
    * 검색 결과에 노트 메타데이터 추가
    */
   getSearchResultsWithMetadata(

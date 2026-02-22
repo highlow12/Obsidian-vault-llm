@@ -9,6 +9,7 @@ import { OvlSettingTab } from "./settings";
 import { DEFAULT_SETTINGS, OvlSettings, EMBEDDING_PRESETS } from "./types";
 import { ChatView, VIEW_TYPE_OVL_CHAT } from "./views/chatView";
 import { Indexer } from "./indexing/indexer";
+import { SearchEngine } from "./indexing/searchEngine";
 import { VaultWatcher } from "./vaultWatcher";
 import { join } from "path";
 import type { AssistantReplyStreamOptions } from "./pluginApi";
@@ -19,6 +20,7 @@ export default class OvlPlugin extends Plugin {
   private lastSavedSettings: OvlSettings = { ...DEFAULT_SETTINGS };
   private apiClient: OvlApiClient | null = null;
   private indexer: Indexer | null = null;
+  private searchEngine: SearchEngine | null = null;
   private vaultWatcher: VaultWatcher | null = null;
   private indexingEventsRegistered: boolean = false;
 
@@ -92,6 +94,7 @@ export default class OvlPlugin extends Plugin {
       if (this.indexer) {
         this.indexer.close();
         this.indexer = null;
+        this.searchEngine = null;
       }
 
       // 데이터 디렉토리 경로
@@ -105,6 +108,9 @@ export default class OvlPlugin extends Plugin {
 
       const metaStorePath = join(dataDir, "meta.json");
       const vectorStorePath = join(dataDir, "vectors.json");
+      // @ts-ignore - Obsidian API의 내부 속성 사용. FileSystemAdapter에만 존재합니다.
+      const vaultBasePath: string = this.app.vault.adapter.basePath ?? dataDir;
+      const traceLogPath = join(vaultBasePath, ".rag_logs", "trace.json");
 
       // 인덱서 생성
       this.indexer = new Indexer({
@@ -121,6 +127,9 @@ export default class OvlPlugin extends Plugin {
       });
 
       await this.indexer.initialize();
+
+      // 하이브리드 검색 엔진 생성 (트레이스 로그 경로 포함)
+      this.searchEngine = new SearchEngine(this.indexer, traceLogPath);
 
       // 볼트 워처 설정
       this.vaultWatcher = new VaultWatcher(this.app.vault);
@@ -196,15 +205,14 @@ export default class OvlPlugin extends Plugin {
   }
 
   /**
-   * 벡터 검색 수행
+   * 하이브리드 검색 수행 (벡터 + 키워드 + RRF)
    */
   public async search(query: string): Promise<Array<{ chunk: any; note: any; score: number }>> {
-    if (!this.indexer) {
+    if (!this.searchEngine) {
       throw new Error("인덱싱이 활성화되지 않았습니다");
     }
 
-    const searchResults = await this.indexer.search(query);
-    return this.indexer.getSearchResultsWithMetadata(searchResults);
+    return this.searchEngine.hybridSearch(query, this.settings.topK);
   }
 
   private async openChatView(): Promise<void> {
@@ -294,6 +302,7 @@ export default class OvlPlugin extends Plugin {
       if (!this.settings.indexingEnabled) {
         this.indexer?.close();
         this.indexer = null;
+        this.searchEngine = null;
         this.vaultWatcher?.setIndexer(null);
         this.vaultWatcher = null;
       } else {
