@@ -1,6 +1,6 @@
 import { ItemView, MarkdownRenderer, Notice, WorkspaceLeaf } from "obsidian";
-import type { ConversationTurn } from "../conversation";
-import type { PluginChatApi } from "../pluginApi";
+import type { AssistantGenerationLog, ConversationTurn } from "../conversation";
+import type { AssistantTokenUsage, PluginChatApi } from "../pluginApi";
 import { TopicSeparationEngine } from "../topicSeparation";
 import { saveSegmentsAsNotes } from "../topicSeparation";
 
@@ -12,10 +12,20 @@ export class ChatView extends ItemView {
   private messagesEl: HTMLDivElement | null = null;
   private inputEl: HTMLTextAreaElement | null = null;
   private sendButtonEl: HTMLButtonElement | null = null;
+  private stopButtonEl: HTMLButtonElement | null = null;
+  private vaultSearchButtonEl: HTMLButtonElement | null = null;
+  private historySelectEl: HTMLSelectElement | null = null;
+  private deleteSessionButtonEl: HTMLButtonElement | null = null;
   private saveButtonEl: HTMLButtonElement | null = null;
+  private newSessionButtonEl: HTMLButtonElement | null = null;
   private sessionIdEl: HTMLInputElement | null = null;
-  private useRagCheckbox: HTMLInputElement | null = null;
   private showSourcesCheckbox: HTMLInputElement | null = null;
+  private activeAbortController: AbortController | null = null;
+  private streamingMessageEl: HTMLDivElement | null = null;
+  private streamingContentEl: HTMLDivElement | null = null;
+  private streamingTurn: ConversationTurn | null = null;
+  private isApplyingLoadedSession: boolean = false;
+  private suppressHistorySelectionChange: boolean = false;
 
   constructor(leaf: WorkspaceLeaf, plugin: PluginChatApi) {
     super(leaf);
@@ -49,16 +59,8 @@ export class ChatView extends ItemView {
     this.sessionIdEl = sessionInputEl;
 
     const controlsEl = headerEl.createEl("div", { cls: "ovl-chat-controls" });
-    
-    // RAG 옵션
-    const ragWrapEl = controlsEl.createEl("div", { cls: "ovl-rag-options" });
-    const useRagLabel = ragWrapEl.createEl("label");
-    const useRagCheckbox = useRagLabel.createEl("input", { type: "checkbox" });
-    useRagCheckbox.checked = true;
-    useRagLabel.appendText(" RAG 사용");
-    this.useRagCheckbox = useRagCheckbox;
 
-    const showSourcesLabel = ragWrapEl.createEl("label");
+    const showSourcesLabel = controlsEl.createEl("label", { cls: "ovl-source-option" });
     const showSourcesCheckbox = showSourcesLabel.createEl("input", { type: "checkbox" });
     showSourcesCheckbox.checked = false;
     showSourcesLabel.appendText(" 소스만 보기");
@@ -70,6 +72,24 @@ export class ChatView extends ItemView {
     });
     this.saveButtonEl = saveButtonEl;
 
+    const newSessionButtonEl = controlsEl.createEl("button", { text: "새 세션", cls: "ovl-chat-button" });
+    newSessionButtonEl.addEventListener("click", () => {
+      void this.handleStartNewSession();
+    });
+    this.newSessionButtonEl = newSessionButtonEl;
+
+    const historySelectEl = controlsEl.createEl("select", { cls: "ovl-session-select" });
+    historySelectEl.addEventListener("change", () => {
+      void this.handleHistorySelectionChange();
+    });
+    this.historySelectEl = historySelectEl;
+
+    const deleteSessionButtonEl = controlsEl.createEl("button", { text: "x", cls: "ovl-chat-button" });
+    deleteSessionButtonEl.addEventListener("click", () => {
+      void this.handleDeleteSelectedSession();
+    });
+    this.deleteSessionButtonEl = deleteSessionButtonEl;
+
     const messagesEl = contentEl.createEl("div", { cls: "ovl-chat-messages" });
     this.messagesEl = messagesEl;
 
@@ -78,18 +98,37 @@ export class ChatView extends ItemView {
     textareaEl.placeholder = "메시지를 입력하세요. (Ctrl+Enter 전송)";
     this.inputEl = textareaEl;
 
-    const sendButtonEl = inputWrapEl.createEl("button", { text: "전송", cls: "ovl-chat-button" });
+    const actionWrapEl = inputWrapEl.createEl("div", { cls: "ovl-chat-actions" });
+    const vaultSearchButtonEl = actionWrapEl.createEl("button", {
+      text: "볼트 검색 답변",
+      cls: "ovl-chat-button"
+    });
+    vaultSearchButtonEl.addEventListener("click", () => {
+      void this.handleSend(true);
+    });
+    this.vaultSearchButtonEl = vaultSearchButtonEl;
+
+    const sendButtonEl = actionWrapEl.createEl("button", { text: "전송", cls: "ovl-chat-button" });
     sendButtonEl.addEventListener("click", () => {
-      void this.handleSend();
+      void this.handleSend(false);
     });
     this.sendButtonEl = sendButtonEl;
+
+    const stopButtonEl = actionWrapEl.createEl("button", { text: "중단", cls: "ovl-chat-button" });
+    stopButtonEl.disabled = true;
+    stopButtonEl.addEventListener("click", () => {
+      this.handleStopStreaming();
+    });
+    this.stopButtonEl = stopButtonEl;
 
     textareaEl.addEventListener("keydown", (event) => {
       if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
         event.preventDefault();
-        void this.handleSend();
+        void this.handleSend(false);
       }
     });
+
+    await this.refreshHistoryDropdown();
   }
 
   private buildSessionId(): string {
@@ -100,18 +139,40 @@ export class ChatView extends ItemView {
   private setBusyState(state: {
     isBusy: boolean;
     sendLoading?: boolean;
+    vaultSearchLoading?: boolean;
     saveLoading?: boolean;
+    stopEnabled?: boolean;
+    disableHistoryActions?: boolean;
   }): void {
     const sendLoading = state.sendLoading ?? false;
+    const vaultSearchLoading = state.vaultSearchLoading ?? false;
     const saveLoading = state.saveLoading ?? false;
+    const stopEnabled = state.stopEnabled ?? false;
+    const disableHistoryActions = state.disableHistoryActions ?? false;
 
     if (this.sendButtonEl) {
       this.sendButtonEl.disabled = state.isBusy;
       this.sendButtonEl.classList.toggle("is-loading", sendLoading);
     }
+    if (this.vaultSearchButtonEl) {
+      this.vaultSearchButtonEl.disabled = state.isBusy;
+      this.vaultSearchButtonEl.classList.toggle("is-loading", vaultSearchLoading);
+    }
     if (this.saveButtonEl) {
       this.saveButtonEl.disabled = state.isBusy;
       this.saveButtonEl.classList.toggle("is-loading", saveLoading);
+    }
+    if (this.newSessionButtonEl) {
+      this.newSessionButtonEl.disabled = state.isBusy;
+    }
+    if (this.historySelectEl) {
+      this.historySelectEl.disabled = state.isBusy || disableHistoryActions;
+    }
+    if (this.deleteSessionButtonEl) {
+      this.deleteSessionButtonEl.disabled = state.isBusy || disableHistoryActions;
+    }
+    if (this.stopButtonEl) {
+      this.stopButtonEl.disabled = !stopEnabled;
     }
     if (this.inputEl) {
       this.inputEl.disabled = state.isBusy;
@@ -155,7 +216,122 @@ export class ChatView extends ItemView {
       });
     }
 
+    if (turn.role === "assistant" && turn.generationLog) {
+      this.renderGenerationLogControls(messageEl, turn.generationLog);
+    }
+
     this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+    await this.persistCurrentSession();
+  }
+
+  private createStreamingAssistantMessage(): void {
+    const turn: ConversationTurn = {
+      role: "assistant",
+      content: "",
+      timestamp: new Date().toISOString()
+    };
+    this.messages.push(turn);
+    this.streamingTurn = turn;
+
+    if (!this.messagesEl) {
+      return;
+    }
+
+    const messageEl = this.messagesEl.createEl("div", {
+      cls: "ovl-chat-message ovl-chat-assistant"
+    });
+    messageEl.createEl("div", {
+      cls: "ovl-chat-role",
+      text: this.getRoleLabel("assistant")
+    });
+
+    const contentEl = messageEl.createEl("div", {
+      cls: "ovl-chat-content markdown-preview-view markdown-rendered"
+    });
+    contentEl.setText("");
+
+    const timestamp = turn.timestamp
+      ? (typeof turn.timestamp === "string" ? turn.timestamp : turn.timestamp.toISOString())
+      : new Date().toISOString();
+
+    messageEl.createEl("div", {
+      cls: "ovl-chat-timestamp",
+      text: timestamp
+    });
+
+    this.streamingMessageEl = messageEl;
+    this.streamingContentEl = contentEl;
+    this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+  }
+
+  private updateStreamingAssistantMessage(token: string): void {
+    if (!this.streamingTurn || !this.streamingContentEl || !token) {
+      return;
+    }
+
+    this.streamingTurn.content += token;
+    this.streamingContentEl.setText(this.streamingTurn.content);
+
+    if (this.messagesEl) {
+      this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+    }
+  }
+
+  private async finalizeStreamingAssistantMessage(finalContent?: string): Promise<void> {
+    if (!this.streamingTurn || !this.streamingContentEl) {
+      this.clearStreamingMessageState();
+      return;
+    }
+
+    if (typeof finalContent === "string") {
+      this.streamingTurn.content = finalContent;
+    }
+
+    this.streamingContentEl.empty();
+    try {
+      await MarkdownRenderer.renderMarkdown(this.streamingTurn.content, this.streamingContentEl, "", this);
+    } catch (error) {
+      const fallback = error instanceof Error ? error.message : String(error);
+      this.streamingContentEl.setText(`렌더링 실패: ${fallback}`);
+    }
+
+    if (this.streamingMessageEl && this.streamingTurn.generationLog) {
+      this.renderGenerationLogControls(this.streamingMessageEl, this.streamingTurn.generationLog);
+    }
+
+    if (this.messagesEl) {
+      this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+    }
+
+    await this.persistCurrentSession();
+
+    this.clearStreamingMessageState();
+  }
+
+  private removeStreamingAssistantMessage(): void {
+    if (this.streamingTurn) {
+      const index = this.messages.indexOf(this.streamingTurn);
+      if (index >= 0) {
+        this.messages.splice(index, 1);
+      }
+    }
+
+    this.streamingMessageEl?.remove();
+    this.clearStreamingMessageState();
+  }
+
+  private clearStreamingMessageState(): void {
+    this.streamingTurn = null;
+    this.streamingMessageEl = null;
+    this.streamingContentEl = null;
+  }
+
+  private handleStopStreaming(): void {
+    this.activeAbortController?.abort();
+  }
+
+  private isAbortError(error: unknown): boolean {
+    return error instanceof Error && (error.name === "AbortError" || /중단|abort/i.test(error.message));
   }
 
   private getRoleLabel(role: ConversationTurn["role"]): string {
@@ -168,7 +344,7 @@ export class ChatView extends ItemView {
     return "시스템";
   }
 
-  private async handleSend(): Promise<void> {
+  private async handleSend(useRag: boolean): Promise<void> {
     const input = this.inputEl?.value.trim() ?? "";
     if (!input) {
       new Notice("메시지를 입력해 주세요.");
@@ -190,48 +366,135 @@ export class ChatView extends ItemView {
       void this.generateSessionTitleFromQuestion(input);
     }
 
-    this.setBusyState({ isBusy: true, sendLoading: true });
+    const abortController = new AbortController();
+    this.activeAbortController = abortController;
+
+    this.setBusyState({
+      isBusy: true,
+      sendLoading: !useRag,
+      vaultSearchLoading: useRag,
+      stopEnabled: true
+    });
     try {
-      const useRag = this.useRagCheckbox?.checked ?? false;
       const showSourcesOnly = this.showSourcesCheckbox?.checked ?? false;
 
       let reply: string;
+      let requestTurns: ConversationTurn[] | null = null;
 
       if (useRag && this.plugin.settings.indexingEnabled) {
         // RAG 사용: 검색 후 컨텍스트 추가
         try {
           const searchResults = await this.plugin.search(input);
+          const relevantResults = this.filterRelevantSearchResults(searchResults);
           
-          if (showSourcesOnly) {
+          if (relevantResults.length === 0) {
+            if (showSourcesOnly) {
+              reply = "질문과 유사한 노트를 찾지 못했습니다.";
+            } else {
+              requestTurns = this.messages;
+              reply = "";
+            }
+          } else if (showSourcesOnly) {
             // 소스만 표시
-            reply = this.formatSearchResults(searchResults);
+            reply = this.formatSearchResults(relevantResults);
           } else {
             // 검색 결과를 컨텍스트로 LLM에 전달
-            const context = this.buildContext(searchResults);
+            const context = this.buildContext(relevantResults);
             const enhancedMessages = this.buildEnhancedMessages(input, context);
-            reply = await this.plugin.requestAssistantReply(enhancedMessages);
+            requestTurns = enhancedMessages;
+            reply = "";
           }
         } catch (error) {
           console.error("RAG 검색 실패:", error);
           new Notice("검색에 실패하여 일반 모드로 전환합니다");
-          reply = await this.plugin.requestAssistantReply(this.messages);
+          requestTurns = this.messages;
+          reply = "";
         }
       } else {
         // 일반 모드
-        reply = await this.plugin.requestAssistantReply(this.messages);
+        requestTurns = this.messages;
+        reply = "";
       }
 
-      await this.appendMessage({
-        role: "assistant",
-        content: reply,
-        timestamp: new Date().toISOString()
-      });
+      if (requestTurns) {
+        this.createStreamingAssistantMessage();
+        const startedAtMs = Date.now();
+        let latestUsage: AssistantTokenUsage | undefined;
+        let streamedReply = "";
+        try {
+          reply = await this.plugin.requestAssistantReplyStream(requestTurns, {
+            signal: abortController.signal,
+            onToken: (token) => {
+              streamedReply += token;
+              this.updateStreamingAssistantMessage(token);
+            },
+            onUsage: (usage) => {
+              latestUsage = usage;
+            }
+          });
+          if (!reply) {
+            reply = streamedReply;
+          }
+
+          if (this.streamingTurn) {
+            this.streamingTurn.generationLog = this.buildAssistantGenerationLog({
+              requestTurns,
+              reply,
+              startedAtMs,
+              completedAtMs: Date.now(),
+              usage: latestUsage
+            });
+          }
+
+          await this.finalizeStreamingAssistantMessage(reply);
+        } catch (error) {
+          const partialReply = streamedReply || this.streamingTurn?.content || "";
+          if (partialReply) {
+            if (this.streamingTurn) {
+              this.streamingTurn.generationLog = this.buildAssistantGenerationLog({
+                requestTurns,
+                reply: partialReply,
+                startedAtMs,
+                completedAtMs: Date.now(),
+                usage: latestUsage
+              });
+            }
+            await this.finalizeStreamingAssistantMessage(partialReply);
+          } else {
+            this.removeStreamingAssistantMessage();
+          }
+
+          if (this.isAbortError(error)) {
+            new Notice("응답 생성을 중단했습니다.");
+            return;
+          }
+          throw error;
+        }
+      } else {
+        await this.appendMessage({
+          role: "assistant",
+          content: reply,
+          timestamp: new Date().toISOString()
+        });
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       new Notice(`대화 실패: ${message}`);
     } finally {
+      this.activeAbortController = null;
       this.setBusyState({ isBusy: false });
     }
+  }
+
+  private filterRelevantSearchResults(searchResults: any[]): any[] {
+    const threshold = this.plugin.settings.searchSimilarityThreshold;
+    return searchResults.filter((result) => {
+      const score = Number(result?.score);
+      if (!Number.isFinite(score)) {
+        return false;
+      }
+      return score >= threshold;
+    });
   }
 
   private buildContext(searchResults: any[]): string {
@@ -292,6 +555,102 @@ ${context}`;
     ];
   }
 
+  private buildAssistantGenerationLog(params: {
+    requestTurns: ConversationTurn[];
+    reply: string;
+    startedAtMs: number;
+    completedAtMs: number;
+    usage?: AssistantTokenUsage;
+  }): AssistantGenerationLog {
+    const durationMs = Math.max(1, params.completedAtMs - params.startedAtMs);
+    const estimatedInputTokens = this.estimateTokenCount(
+      params.requestTurns.map((turn) => turn.content).join("\n")
+    );
+    const estimatedOutputTokens = this.estimateTokenCount(params.reply);
+
+    const inputTokens = params.usage?.inputTokens ?? estimatedInputTokens;
+    const outputTokens = params.usage?.outputTokens ?? estimatedOutputTokens;
+    const totalTokens = params.usage?.totalTokens ?? inputTokens + outputTokens;
+    const tokensPerSecond = outputTokens / (durationMs / 1000);
+
+    return {
+      provider: this.plugin.settings.provider,
+      model: this.plugin.settings.model,
+      inputTokens,
+      outputTokens,
+      totalTokens,
+      durationMs,
+      tokensPerSecond,
+      startedAt: new Date(params.startedAtMs).toISOString(),
+      completedAt: new Date(params.completedAtMs).toISOString(),
+      estimated: !params.usage
+    };
+  }
+
+  private estimateTokenCount(text: string): number {
+    const compact = text.replace(/\s+/g, " ").trim();
+    if (!compact) {
+      return 0;
+    }
+
+    const charBased = Math.ceil(compact.length / 4);
+    const wordBased = compact.split(" ").filter(Boolean).length;
+    return Math.max(1, Math.max(charBased, wordBased));
+  }
+
+  private renderGenerationLogControls(messageEl: HTMLDivElement, log: AssistantGenerationLog): void {
+    const controlsEl = messageEl.createEl("div", { cls: "ovl-chat-log-controls" });
+    const buttonEl = controlsEl.createEl("button", {
+      cls: "ovl-chat-log-button",
+      text: "!"
+    });
+    buttonEl.type = "button";
+    buttonEl.setAttribute("aria-label", "생성 로그 보기");
+
+    const panelEl = messageEl.createEl("div", { cls: "ovl-chat-log-panel" });
+    panelEl.addClass("is-hidden");
+
+    const items: Array<{ label: string; value: string }> = [
+      { label: "제공자", value: log.provider || "-" },
+      { label: "모델", value: log.model || "-" },
+      { label: "입력 토큰", value: this.formatTokenValue(log.inputTokens) },
+      { label: "출력 토큰", value: this.formatTokenValue(log.outputTokens) },
+      { label: "총 토큰", value: this.formatTokenValue(log.totalTokens) },
+      { label: "생성 시간", value: `${log.durationMs.toLocaleString()} ms` },
+      { label: "초당 토큰", value: this.formatTokensPerSecond(log.tokensPerSecond) },
+      {
+        label: "토큰 출처",
+        value: log.estimated ? "추정치(응답 기반 계산)" : "API 사용량 메타데이터"
+      }
+    ];
+
+    for (const item of items) {
+      const rowEl = panelEl.createEl("div", { cls: "ovl-chat-log-row" });
+      rowEl.createEl("span", { cls: "ovl-chat-log-label", text: item.label });
+      rowEl.createEl("span", { cls: "ovl-chat-log-value", text: item.value });
+    }
+
+    buttonEl.addEventListener("click", () => {
+      const nextHidden = !panelEl.hasClass("is-hidden");
+      panelEl.toggleClass("is-hidden", nextHidden);
+      buttonEl.toggleClass("is-open", !nextHidden);
+    });
+  }
+
+  private formatTokenValue(value?: number): string {
+    if (!Number.isFinite(value)) {
+      return "-";
+    }
+    return Number(value).toLocaleString();
+  }
+
+  private formatTokensPerSecond(value?: number): string {
+    if (!Number.isFinite(value) || value === undefined) {
+      return "-";
+    }
+    return `${value.toFixed(2)} tps`;
+  }
+
   private async handleSave(): Promise<void> {
     if (this.messages.length === 0) {
       new Notice("저장할 대화가 없습니다.");
@@ -322,7 +681,7 @@ ${context}`;
           const engine = new TopicSeparationEngine({
             apiKey: this.plugin.settings.embeddingApiKey || this.plugin.settings.apiKey,
             embeddingModel: this.plugin.settings.embeddingModel,
-            similarityThreshold: 0.75,
+            similarityThreshold: this.plugin.settings.saveSimilarityThreshold,
             minSegmentLength: 2,
             windowSize: 2,
             enableKeywordMetadata: true,
@@ -379,6 +738,18 @@ ${context}`;
       ]);
       summary = this.cleanSummary(summary);
 
+      if (this.isSummaryTooShort(summary)) {
+        const retryPrompt = this.buildWikiSummaryPrompt(this.messages, true);
+        summary = await this.plugin.requestAssistantReply([
+          {
+            role: "user",
+            content: retryPrompt,
+            timestamp: new Date().toISOString()
+          }
+        ]);
+        summary = this.cleanSummary(summary);
+      }
+
       const targetPath = await this.plugin.saveConversationFromTurns(
         finalSessionId,
         [
@@ -411,9 +782,144 @@ ${context}`;
     if (this.sessionIdEl) {
       this.sessionIdEl.value = this.buildSessionId();
     }
+    void this.refreshHistoryDropdown();
   }
 
-  private buildWikiSummaryPrompt(turns: ConversationTurn[]): string {
+  private async handleStartNewSession(): Promise<void> {
+    this.setBusyState({ isBusy: true, disableHistoryActions: true });
+    try {
+      this.activeAbortController?.abort();
+      this.clearStreamingMessageState();
+
+      const sessionId = this.sessionIdEl?.value.trim() ?? "";
+      if (this.messages.length > 0 && sessionId) {
+        await this.plugin.saveChatSession(sessionId, this.messages);
+      }
+
+      this.resetSession();
+      new Notice("새 세션을 시작했습니다.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      new Notice(`새 세션 시작 실패: ${message}`);
+    } finally {
+      this.setBusyState({ isBusy: false });
+    }
+  }
+
+  private async handleHistorySelectionChange(): Promise<void> {
+    if (!this.historySelectEl || this.suppressHistorySelectionChange) {
+      return;
+    }
+    const sessionId = this.historySelectEl.value;
+    if (!sessionId) {
+      return;
+    }
+
+    await this.loadHistorySessionById(sessionId);
+  }
+
+  private async handleDeleteSelectedSession(): Promise<void> {
+    if (!this.historySelectEl) {
+      return;
+    }
+
+    const sessionId = this.historySelectEl.value;
+    if (!sessionId) {
+      new Notice("삭제할 세션을 먼저 선택해 주세요.");
+      return;
+    }
+
+    this.setBusyState({ isBusy: true, disableHistoryActions: true });
+    try {
+      await this.plugin.deleteChatSession(sessionId);
+      await this.refreshHistoryDropdown();
+      new Notice(`세션을 삭제했습니다: ${sessionId}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      new Notice(`세션 삭제 실패: ${message}`);
+    } finally {
+      this.setBusyState({ isBusy: false });
+    }
+  }
+
+  private async loadHistorySessionById(sessionId: string): Promise<void> {
+    this.setBusyState({ isBusy: true, disableHistoryActions: true });
+    try {
+      const turns = await this.plugin.loadChatSession(sessionId);
+      this.activeAbortController?.abort();
+      this.clearStreamingMessageState();
+      this.isApplyingLoadedSession = true;
+      this.messages = [];
+      if (this.messagesEl) {
+        this.messagesEl.empty();
+      }
+      for (const turn of turns) {
+        await this.appendMessage(turn);
+      }
+      this.isApplyingLoadedSession = false;
+      if (this.sessionIdEl) {
+        this.sessionIdEl.value = sessionId;
+      }
+      await this.persistCurrentSession();
+      await this.refreshHistoryDropdown(sessionId);
+      new Notice(`대화 기록을 불러왔습니다: ${sessionId}`);
+    } catch (error) {
+      this.isApplyingLoadedSession = false;
+      const message = error instanceof Error ? error.message : String(error);
+      new Notice(`대화 기록 불러오기 실패: ${message}`);
+    } finally {
+      this.setBusyState({ isBusy: false });
+    }
+  }
+
+  private async refreshHistoryDropdown(selectedSessionId?: string): Promise<void> {
+    if (!this.historySelectEl) {
+      return;
+    }
+
+    const sessions = await this.plugin.listChatSessions();
+    this.suppressHistorySelectionChange = true;
+    this.historySelectEl.empty();
+
+    const placeholder = this.historySelectEl.createEl("option", {
+      text: "기록 불러오기",
+      value: ""
+    });
+    placeholder.selected = true;
+
+    for (const session of sessions) {
+      const option = this.historySelectEl.createEl("option", {
+        text: `${session.sessionId} (${session.turnCount})`,
+        value: session.sessionId
+      });
+
+      if (selectedSessionId && session.sessionId === selectedSessionId) {
+        option.selected = true;
+      }
+    }
+
+    this.suppressHistorySelectionChange = false;
+  }
+
+  private async persistCurrentSession(): Promise<void> {
+    if (this.isApplyingLoadedSession) {
+      return;
+    }
+
+    const sessionId = this.sessionIdEl?.value.trim() ?? "";
+    if (!sessionId || this.messages.length === 0) {
+      return;
+    }
+
+    try {
+      await this.plugin.saveChatSession(sessionId, this.messages);
+      await this.refreshHistoryDropdown(sessionId);
+    } catch (error) {
+      console.error("대화 기록 자동 저장 실패:", error);
+    }
+  }
+
+  private buildWikiSummaryPrompt(turns: ConversationTurn[], enforceLongForm: boolean = false): string {
     const transcript = turns
       .map((turn) => {
         const roleLabel =
@@ -424,20 +930,31 @@ ${context}`;
       })
       .join("\n\n");
 
-    return `다음 대화를 위키 형식의 마크다운 본문으로 정리해 주세요.\n\n` +
-      `출력 형식(본문만):\n` +
-      `# 제목\n` +
-      `## 요약\n` +
-      `## 핵심 주제\n` +
-      `## 결정 사항\n` +
-      `## 액션 아이템\n` +
-      `## 열린 질문\n\n` +
+    const minLength = enforceLongForm ? 1800 : 1200;
+
+    return `다음 대화를 자세한 위키 요약문으로 작성해 주세요.\n\n` +
       `요구사항:\n` +
-      `- 위 형식을 지켜서 구조적으로 작성\n` +
-      `- 가능한 경우 목록과 표 사용\n` +
+      `- 출력은 YAML frontmatter 와 본문만 작성\n` +
+      `- # 제목은 쓰지 말고 바로 본문부터 시작\n` +
+      `- 형식(헤더/목록/표)은 자유롭게 선택하되, 가독성은 유지\n` +
+      `- 단순 압축 요약이 아니라 맥락, 근거, 결론, 후속 과제를 충분히 설명\n` +
+      `- 대화 흐름(문제 제기 -> 검토 -> 판단/결정 -> 실행 계획)이 보이게 정리\n` +
+      `- 등장한 주요 개념, 조건, 제약, 대안, 트레이드오프를 빠짐없이 포함\n` +
+      `- 실행 가능한 항목은 구체적 행동 단위로 작성(누가/무엇을/어떻게)\n` +
+      `- 불확실한 내용과 추가 확인이 필요한 항목을 분리해서 명시\n` +
       `- 한국어로 작성\n` +
-      `- "어시스턴트"/타임스탬프/서문/설명/사족 없이 본문만 출력\n\n` +
+      `- 최소 ${minLength}자 이상으로 충분히 자세히 작성\n` +
+      `- "어시스턴트", 타임스탬프, 서문성 멘트, 사족 없이 본문만 출력\n\n` +
       `대화 기록:\n${transcript}`;
+  }
+
+  private isSummaryTooShort(summary: string): boolean {
+    const compact = summary
+      .replace(/```[\s\S]*?```/g, "")
+      .replace(/\s+/g, "")
+      .trim();
+
+    return compact.length < 900;
   }
 
   private cleanSummary(summary: string): string {

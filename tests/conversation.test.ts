@@ -23,8 +23,9 @@ test("convertToMarkdown은 대화를 마크다운으로 변환한다", () => {
   
   const markdown = convertToMarkdown(conversation);
   
-  assert.match(markdown, /# 대화 기록 - test-session/);
-  assert.match(markdown, /생성일: 2024-01-01T00:00:00.000Z/);
+  assert.match(markdown, /---/);
+  assert.match(markdown, /sessionId: "test-session"/);
+  assert.match(markdown, /createdAt: "2024-01-01T00:00:00.000Z"/);
   assert.match(markdown, /## 👤 사용자/);
   assert.match(markdown, /안녕하세요/);
   assert.match(markdown, /## 🤖 어시스턴트/);
@@ -50,7 +51,7 @@ test("saveConversation은 대화를 파일로 저장한다", () => {
     assert.equal(path.basename(filepath), "2024-01-15-test-123.md");
     
     const content = fs.readFileSync(filepath, "utf-8");
-    assert.match(content, /# 대화 기록 - test-123/);
+    assert.match(content, /sessionId: "test-123"/);
     assert.match(content, /테스트 질문/);
     assert.match(content, /테스트 답변/);
   } finally {

@@ -11,6 +11,8 @@ import { ChatView, VIEW_TYPE_OVL_CHAT } from "./views/chatView";
 import { Indexer } from "./indexing/indexer";
 import { VaultWatcher } from "./vaultWatcher";
 import { join } from "path";
+import type { AssistantReplyStreamOptions } from "./pluginApi";
+import { deleteChatSession, listChatSessions, loadChatSession, saveChatSession } from "./chatSessionStore";
 
 export default class OvlPlugin extends Plugin {
   public settings: OvlSettings = { ...DEFAULT_SETTINGS };
@@ -224,6 +226,16 @@ export default class OvlPlugin extends Plugin {
     return this.apiClient.requestAssistantReply(turns);
   }
 
+  public async requestAssistantReplyStream(
+    turns: ConversationTurn[],
+    options: AssistantReplyStreamOptions
+  ): Promise<string> {
+    if (!this.apiClient) {
+      throw new Error("API 클라이언트를 초기화할 수 없습니다.");
+    }
+    return this.apiClient.requestAssistantReplyStream(turns, options);
+  }
+
   public async requestTitleReply(prompt: string): Promise<string> {
     if (!this.apiClient) {
       throw new Error("API 클라이언트를 초기화할 수 없습니다.");
@@ -237,6 +249,22 @@ export default class OvlPlugin extends Plugin {
     outputFolder: string
   ): Promise<string> {
     return saveConversationFromTurns(this.app.vault, sessionId, turns, outputFolder);
+  }
+
+  public async saveChatSession(sessionId: string, turns: ConversationTurn[]): Promise<string> {
+    return saveChatSession(this.app.vault, sessionId, turns);
+  }
+
+  public async listChatSessions() {
+    return listChatSessions(this.app.vault);
+  }
+
+  public async loadChatSession(sessionId: string): Promise<ConversationTurn[]> {
+    return loadChatSession(this.app.vault, sessionId);
+  }
+
+  public async deleteChatSession(sessionId: string): Promise<void> {
+    await deleteChatSession(this.app.vault, sessionId);
   }
 
   private async loadSettings(): Promise<void> {

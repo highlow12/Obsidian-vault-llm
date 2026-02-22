@@ -274,6 +274,38 @@ export class OvlSettingTab extends PluginSettingTab {
           })
       );
 
+    new Setting(containerEl)
+      .setName("검색 유사도 임계값")
+      .setDesc("RAG 검색 결과로 채택할 최소 유사도 (0~1, 기본: 0.35)")
+      .addText((text) =>
+        text
+          .setPlaceholder("0.35")
+          .setValue(String(this.plugin.settings.searchSimilarityThreshold))
+          .onChange(async (value) => {
+            const num = Number.parseFloat(value);
+            if (!Number.isNaN(num) && num >= 0 && num <= 1) {
+              this.plugin.settings.searchSimilarityThreshold = num;
+              await this.plugin.saveSettings();
+            }
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("저장 유사도 임계값")
+      .setDesc("대화 저장 시 주제 분리 기준 유사도 (0~1, 기본: 0.75)")
+      .addText((text) =>
+        text
+          .setPlaceholder("0.75")
+          .setValue(String(this.plugin.settings.saveSimilarityThreshold))
+          .onChange(async (value) => {
+            const num = Number.parseFloat(value);
+            if (!Number.isNaN(num) && num >= 0 && num <= 1) {
+              this.plugin.settings.saveSimilarityThreshold = num;
+              await this.plugin.saveSettings();
+            }
+          })
+      );
+
     containerEl.createEl("h3", { text: "임베딩 설정" });
 
     let embeddingModelInput: { setValue: (value: string) => void } | null = null;

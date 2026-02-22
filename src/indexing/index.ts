@@ -3,6 +3,7 @@
 export * from "./types";
 export * from "./parser";
 export * from "./chunker";
+export * from "./queryKeywordEmbedding";
 export * from "./embeddings";
 export * from "./vectorIndex";
 export * from "./vectorIndexFactory";

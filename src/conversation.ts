@@ -1,11 +1,29 @@
 import fs from "node:fs";
 import path from "node:path";
 
+function yamlQuote(value: string): string {
+  return JSON.stringify(value);
+}
+
 // 대화의 각 턴을 나타내는 타입
+export type AssistantGenerationLog = {
+  provider?: string;
+  model?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  durationMs: number;
+  tokensPerSecond?: number;
+  startedAt: string;
+  completedAt: string;
+  estimated: boolean;
+};
+
 export type ConversationTurn = {
   role: "user" | "assistant" | "system";
   content: string;
   timestamp?: Date | string;
+  generationLog?: AssistantGenerationLog;
 };
 
 // 대화 전체를 나타내는 타입
@@ -18,14 +36,23 @@ export type Conversation = {
 // 대화를 마크다운 형식으로 변환
 export function convertToMarkdown(conversation: Conversation): string {
   const lines: string[] = [];
-  
-  // 헤더: 제목과 메타데이터
-  lines.push(`# 대화 기록 - ${conversation.sessionId}`);
-  lines.push("");
-  lines.push(`생성일: ${conversation.createdAt.toISOString()}`);
-  lines.push("");
+
+  // YAML 프론트매터
+  const roleList = Array.from(new Set(conversation.turns.map((turn) => turn.role))).join(", ");
+  lines.push("---");
+  lines.push(`sessionId: ${yamlQuote(conversation.sessionId)}`);
+  lines.push(`createdAt: ${yamlQuote(conversation.createdAt.toISOString())}`);
+  lines.push(`turnCount: ${conversation.turns.length}`);
+  lines.push(`roles: [${roleList}]`);
   lines.push("---");
   lines.push("");
+
+  // 단일 요약 저장(assistant 1턴)인 경우 본문만 그대로 출력
+  if (conversation.turns.length === 1 && conversation.turns[0].role === "assistant") {
+    lines.push(conversation.turns[0].content.trim());
+    lines.push("");
+    return lines.join("\n");
+  }
   
   // 각 턴을 마크다운으로 변환
   for (const turn of conversation.turns) {

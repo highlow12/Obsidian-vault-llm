@@ -8,6 +8,7 @@ import { IndexingConfig, NoteMetadata, Chunk } from "./types";
 import { createHash } from "crypto";
 import { VectorIndex } from "./vectorIndex";
 import { createVectorIndex } from "./vectorIndexFactory";
+import { buildQueryEmbeddingText } from "./queryKeywordEmbedding";
 
 export class Indexer {
   private metadataStore: MetadataStore;
@@ -145,7 +146,8 @@ export class Indexer {
     const topK = k || this.config.topK;
 
     // 쿼리 임베딩 생성
-    const queryEmbedding = await this.embeddingGenerator.embed(query);
+    const queryTextForEmbedding = buildQueryEmbeddingText(query);
+    const queryEmbedding = await this.embeddingGenerator.embed(queryTextForEmbedding || query);
 
     const currentDimension = this.vectorStore.getDimension();
     if (currentDimension !== null && queryEmbedding.length !== currentDimension) {

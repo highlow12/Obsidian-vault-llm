@@ -36,7 +36,7 @@ test("save-conversation 명령은 JSON 파일에서 대화를 읽어 마크다�
     assert.equal(files.length, 1);
     
     const content = fs.readFileSync(path.join(tempDir, files[0]), "utf-8");
-    assert.match(content, /# 대화 기록 - test-session-1/);
+    assert.match(content, /sessionId: "test-session-1"/);
     assert.match(content, /질문입니다/);
     assert.match(content, /답변입니다/);
   } finally {

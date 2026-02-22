@@ -14,6 +14,8 @@ export type OvlSettings = {
   chunkSize: number;
   chunkOverlap: number;
   topK: number;
+  searchSimilarityThreshold: number;
+  saveSimilarityThreshold: number;
   // 임베딩 설정
   embeddingProvider: EmbeddingProvider;
   embeddingApiKey: string;
@@ -70,6 +72,8 @@ export const DEFAULT_SETTINGS: OvlSettings = {
   chunkSize: 400,
   chunkOverlap: 50,
   topK: 8,
+  searchSimilarityThreshold: 0.35,
+  saveSimilarityThreshold: 0.75,
   // 임베딩 기본 설정 (Gemini)
   embeddingProvider: "gemini",
   embeddingApiKey: "",
