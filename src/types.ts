@@ -18,6 +18,7 @@ export type OvlSettings = {
   embeddingProvider: EmbeddingProvider;
   embeddingApiKey: string;
   embeddingModel: string;
+  embeddingApiUrl: string;
 };
 
 export const PROVIDER_PRESETS: Record<ApiProvider, { apiUrl: string; model: string }> = {
@@ -73,4 +74,5 @@ export const DEFAULT_SETTINGS: OvlSettings = {
   embeddingProvider: "gemini",
   embeddingApiKey: "",
   embeddingModel: EMBEDDING_PRESETS.gemini.model,
+  embeddingApiUrl: EMBEDDING_PRESETS.gemini.apiUrl || "",
 };

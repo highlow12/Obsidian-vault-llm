@@ -4,7 +4,6 @@
 
 import type { App, PluginManifest } from 'obsidian';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { appendEmbeddingLog } from '../logging';
 
 /**
  * 코사인 유사도를 계산합니다
@@ -78,7 +77,11 @@ export class EmbeddingGenerator {
     } else {
       try {
         const result = await this.model.embedContent(text);
-        embedding = result.embedding.values;
+        const values = result?.embedding?.values;
+        if (!Array.isArray(values) || values.length === 0) {
+          throw new Error('임베딩 응답이 비어 있습니다');
+        }
+        embedding = values;
 
         // 캐시에 저장
         this.cache.set(text, embedding);
@@ -88,9 +91,14 @@ export class EmbeddingGenerator {
       }
     }
 
+    if (!embedding) {
+      throw new Error('임베딩 생성 결과가 없습니다');
+    }
+
     // 로깅 처리 - 모든 임베딩(캐시 포함)을 로깅
     if (this.enableLogging && this.app) {
       try {
+        const { appendEmbeddingLog } = await import('../logging');
         let similarity: number | undefined;
         let previousText: string | undefined;
 

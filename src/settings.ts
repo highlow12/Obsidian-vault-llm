@@ -277,6 +277,7 @@ export class OvlSettingTab extends PluginSettingTab {
     containerEl.createEl("h3", { text: "임베딩 설정" });
 
     let embeddingModelInput: { setValue: (value: string) => void } | null = null;
+    let embeddingApiUrlInput: { setValue: (value: string) => void } | null = null;
 
     new Setting(containerEl)
       .setName("임베딩 제공자")
@@ -295,11 +296,29 @@ export class OvlSettingTab extends PluginSettingTab {
             this.plugin.settings.embeddingProvider = provider;
             const preset = EMBEDDING_PRESETS[provider];
             this.plugin.settings.embeddingModel = preset.model;
+            this.plugin.settings.embeddingApiUrl = preset.apiUrl || "";
             embeddingModelInput?.setValue(preset.model);
+            embeddingApiUrlInput?.setValue(preset.apiUrl || "");
             await this.plugin.saveSettings();
             this.display();
           });
       });
+
+    if (this.plugin.settings.embeddingProvider !== "local") {
+      new Setting(containerEl)
+        .setName("임베딩 API URL")
+        .setDesc("임베딩 요청 엔드포인트 URL (비어있으면 제공자 기본값 사용)")
+        .addText((text) => {
+          embeddingApiUrlInput = text;
+          text
+            .setPlaceholder("https://api.openai.com/v1/embeddings")
+            .setValue(this.plugin.settings.embeddingApiUrl)
+            .onChange(async (value) => {
+              this.plugin.settings.embeddingApiUrl = value.trim();
+              await this.plugin.saveSettings();
+            });
+        });
+    }
 
     if (this.plugin.settings.embeddingProvider !== "local") {
       new Setting(containerEl)

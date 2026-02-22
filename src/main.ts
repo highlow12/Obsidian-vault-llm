@@ -14,9 +14,11 @@ import { join } from "path";
 
 export default class OvlPlugin extends Plugin {
   public settings: OvlSettings = { ...DEFAULT_SETTINGS };
+  private lastSavedSettings: OvlSettings = { ...DEFAULT_SETTINGS };
   private apiClient: OvlApiClient | null = null;
   private indexer: Indexer | null = null;
   private vaultWatcher: VaultWatcher | null = null;
+  private indexingEventsRegistered: boolean = false;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -85,6 +87,11 @@ export default class OvlPlugin extends Plugin {
    */
   private async initializeIndexing(): Promise<void> {
     try {
+      if (this.indexer) {
+        this.indexer.close();
+        this.indexer = null;
+      }
+
       // 데이터 디렉토리 경로
       const dataDir = join(
         // @ts-ignore - Obsidian API의 내부 속성 사용
@@ -94,20 +101,21 @@ export default class OvlPlugin extends Plugin {
         this.manifest.id
       );
 
-      const metaDbPath = join(dataDir, "meta.db");
-      const vectorDbPath = join(dataDir, "vectors.db");
+      const metaStorePath = join(dataDir, "meta.json");
+      const vectorStorePath = join(dataDir, "vectors.json");
 
       // 인덱서 생성
       this.indexer = new Indexer({
         chunkSize: this.settings.chunkSize,
         chunkOverlap: this.settings.chunkOverlap,
         topK: this.settings.topK,
+        vectorIndexEngine: "json",
         embeddingProvider: this.settings.embeddingProvider,
         embeddingModel: this.settings.embeddingModel,
         embeddingApiKey: this.settings.embeddingApiKey || this.settings.apiKey,
         embeddingApiUrl: this.getEmbeddingApiUrl(),
-        metaDbPath,
-        vectorDbPath,
+        metaStorePath,
+        vectorStorePath,
       });
 
       await this.indexer.initialize();
@@ -116,38 +124,41 @@ export default class OvlPlugin extends Plugin {
       this.vaultWatcher = new VaultWatcher(this.app.vault);
       this.vaultWatcher.setIndexer(this.indexer);
 
-      // 파일 이벤트 리스너 등록
-      this.registerEvent(
-        this.app.vault.on("create", (file) => {
-          if (file instanceof TFile) {
-            void this.vaultWatcher?.onFileCreate(file);
-          }
-        })
-      );
+      if (!this.indexingEventsRegistered) {
+        // 파일 이벤트 리스너 등록
+        this.registerEvent(
+          this.app.vault.on("create", (file) => {
+            if (file instanceof TFile) {
+              void this.vaultWatcher?.onFileCreate(file);
+            }
+          })
+        );
 
-      this.registerEvent(
-        this.app.vault.on("modify", (file) => {
-          if (file instanceof TFile) {
-            void this.vaultWatcher?.onFileModify(file);
-          }
-        })
-      );
+        this.registerEvent(
+          this.app.vault.on("modify", (file) => {
+            if (file instanceof TFile) {
+              void this.vaultWatcher?.onFileModify(file);
+            }
+          })
+        );
 
-      this.registerEvent(
-        this.app.vault.on("delete", (file) => {
-          if (file instanceof TFile) {
-            this.vaultWatcher?.onFileDelete(file);
-          }
-        })
-      );
+        this.registerEvent(
+          this.app.vault.on("delete", (file) => {
+            if (file instanceof TFile) {
+              this.vaultWatcher?.onFileDelete(file);
+            }
+          })
+        );
 
-      this.registerEvent(
-        this.app.vault.on("rename", (file, oldPath) => {
-          if (file instanceof TFile) {
-            void this.vaultWatcher?.onFileRename(file, oldPath);
-          }
-        })
-      );
+        this.registerEvent(
+          this.app.vault.on("rename", (file, oldPath) => {
+            if (file instanceof TFile) {
+              void this.vaultWatcher?.onFileRename(file, oldPath);
+            }
+          })
+        );
+        this.indexingEventsRegistered = true;
+      }
 
       console.log("인덱싱 시스템 초기화 완료");
     } catch (error) {
@@ -235,16 +246,42 @@ export default class OvlPlugin extends Plugin {
     if (this.settings.embeddingProvider === "local") {
       this.settings.embeddingProvider = "gemini";
       this.settings.embeddingModel = EMBEDDING_PRESETS.gemini.model;
+      this.settings.embeddingApiUrl = EMBEDDING_PRESETS.gemini.apiUrl || "";
       changed = true;
     }
 
     if (changed) {
       await this.saveSettings();
     }
+
+    this.lastSavedSettings = { ...this.settings };
   }
 
   public async saveSettings(): Promise<void> {
+    const previousSettings = { ...this.lastSavedSettings };
     await this.saveData(this.settings);
+    this.lastSavedSettings = { ...this.settings };
+
+    if (previousSettings.indexingEnabled !== this.settings.indexingEnabled) {
+      if (!this.settings.indexingEnabled) {
+        this.indexer?.close();
+        this.indexer = null;
+        this.vaultWatcher?.setIndexer(null);
+        this.vaultWatcher = null;
+      } else {
+        await this.initializeIndexing();
+      }
+      return;
+    }
+
+    if (!this.settings.indexingEnabled || !this.indexer) {
+      return;
+    }
+
+    if (this.shouldReinitializeIndexing(previousSettings, this.settings)) {
+      await this.initializeIndexing();
+      new Notice("임베딩 설정이 변경되어 재인덱싱이 필요합니다. 설정에서 전체 임베딩을 실행해 주세요.");
+    }
   }
 
   private async handleSaveConversation(form: SaveConversationForm): Promise<void> {
@@ -325,6 +362,11 @@ export default class OvlPlugin extends Plugin {
       throw new Error("인덱싱 시스템이 초기화되지 않았습니다");
     }
 
+    const indexer = this.indexer;
+    if (!indexer) {
+      throw new Error("인덱싱 시스템이 초기화되지 않았습니다");
+    }
+
     try {
       console.log("신규 파일 임베딩 시작...");
       
@@ -336,7 +378,7 @@ export default class OvlPlugin extends Plugin {
         try {
           const content = await this.app.vault.cachedRead(file);
           // 각 파일을 인덱싱 (이미 인덱싱된 파일은 indexer에서 확인)
-          await this.indexer.indexFile(file.path, content);
+          await indexer.indexFile(file.path, content);
           indexed++;
         } catch (error) {
           console.warn(`파일 임베딩 실패: ${file.path}`, error);
@@ -354,7 +396,22 @@ export default class OvlPlugin extends Plugin {
    * 임베딩 API URL 가져오기
    */
   private getEmbeddingApiUrl(): string | undefined {
+    if (this.settings.embeddingApiUrl?.trim()) {
+      return this.settings.embeddingApiUrl.trim();
+    }
+
     const preset = EMBEDDING_PRESETS[this.settings.embeddingProvider];
     return preset?.apiUrl;
+  }
+
+  /**
+   * 인덱서 재초기화가 필요한 설정 변경인지 확인
+   */
+  private shouldReinitializeIndexing(previous: OvlSettings, current: OvlSettings): boolean {
+    return (
+      previous.embeddingProvider !== current.embeddingProvider ||
+      previous.embeddingModel !== current.embeddingModel ||
+      previous.embeddingApiUrl !== current.embeddingApiUrl
+    );
   }
 }

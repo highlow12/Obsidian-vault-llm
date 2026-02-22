@@ -1,23 +1,26 @@
 // 인덱서 - 파일 스캔, 파싱, 청킹, 임베딩, 저장을 통합
 
 import { MetadataStore } from "./metadataStore";
-import { VectorStore } from "./vectorStore";
 import { EmbeddingGenerator, EmbeddingConfig } from "./embeddings";
 import { parseMarkdown, computeHash } from "./parser";
 import { chunkText } from "./chunker";
 import { IndexingConfig, NoteMetadata, Chunk } from "./types";
 import { createHash } from "crypto";
+import { VectorIndex } from "./vectorIndex";
+import { createVectorIndex } from "./vectorIndexFactory";
 
 export class Indexer {
   private metadataStore: MetadataStore;
-  private vectorStore: VectorStore;
+  private vectorStore: VectorIndex;
   private embeddingGenerator: EmbeddingGenerator;
   private config: IndexingConfig;
+  private indexSignature: string;
 
   constructor(config: IndexingConfig) {
     this.config = config;
-    this.metadataStore = new MetadataStore(config.metaDbPath);
-    this.vectorStore = new VectorStore(config.vectorDbPath);
+    this.indexSignature = this.generateIndexSignature();
+    this.metadataStore = new MetadataStore(config.metaStorePath, this.indexSignature);
+    this.vectorStore = createVectorIndex(config, this.indexSignature);
     
     const embeddingConfig: EmbeddingConfig = {
       provider: config.embeddingProvider,
@@ -34,6 +37,18 @@ export class Indexer {
    */
   async initialize(): Promise<void> {
     await this.embeddingGenerator.initialize();
+
+    const metadataSignature = this.metadataStore.getIndexSignature();
+    const vectorSignature = this.vectorStore.getIndexSignature();
+
+    if (
+      metadataSignature !== this.indexSignature ||
+      vectorSignature !== this.indexSignature
+    ) {
+      console.log("임베딩 모델 변경 감지: 기존 인덱스를 초기화합니다.");
+      this.metadataStore.reset(this.indexSignature);
+      this.vectorStore.reset(this.indexSignature);
+    }
   }
 
   /**
@@ -132,6 +147,14 @@ export class Indexer {
     // 쿼리 임베딩 생성
     const queryEmbedding = await this.embeddingGenerator.embed(query);
 
+    const currentDimension = this.vectorStore.getDimension();
+    if (currentDimension !== null && queryEmbedding.length !== currentDimension) {
+      console.warn(
+        `쿼리 차원(${queryEmbedding.length})과 인덱스 차원(${currentDimension})이 달라 검색을 건너뜁니다.`
+      );
+      return [];
+    }
+
     // 벡터 검색
     const results = this.vectorStore.search(queryEmbedding, topK);
 
@@ -186,6 +209,19 @@ export class Indexer {
    */
   private generateNoteId(filePath: string): string {
     return createHash("sha256").update(filePath).digest("hex").substring(0, 16);
+  }
+
+  /**
+   * 인덱스 시그니처 생성
+   */
+  private generateIndexSignature(): string {
+    const source = [
+      this.config.embeddingProvider,
+      this.config.embeddingModel,
+      this.config.embeddingApiUrl || "",
+    ].join("::");
+
+    return createHash("sha256").update(source).digest("hex").substring(0, 16);
   }
 
   /**

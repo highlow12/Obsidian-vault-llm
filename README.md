@@ -66,7 +66,7 @@ GitHub Copilot 에이전트가 작업 중 모든 설명과 메시지를 한국�
 
 ## 3. 주요 사용자 시나리오
 1) 사용자는 `ovl init`으로 볼트 경로와 LLM API 키를 설정한다.  
-2) 워커가 볼트를 스캔해 임베딩을 생성하고 로컬 DB/벡터 스토어에 저장한다.  
+2) 워커가 볼트를 스캔해 임베딩을 생성하고 로컬 JSON 스토어(메타/벡터)에 저장한다.  
 3) 사용자가 “지난주 회의록 요약해줘”라고 질의하면, 관련 노트의 스니펫과 함께 답변을 받는다.  
 4) 사용자가 답변을 바탕으로 “새 노트로 저장”을 선택하면 지정 폴더에 초안(.md)이 생성된다.  
 5) 노트를 수정하면 워커가 변경을 감지하고 해당 파일만 재색인한다.
@@ -96,7 +96,7 @@ GitHub Copilot 에이전트가 작업 중 모든 설명과 메시지를 한국�
 ## 5. 데이터 흐름
 1) **색인 파이프라인**  
    파일 변경 → 파서(frontmatter, 링크, 본문 추출) → 청크 분할 → 임베딩 생성 →  
-   메타데이터/임베딩을 SQLite + 벡터 스토어에 저장 → 상태 플래그 업데이트.
+  메타데이터/임베딩을 JSON 메타/벡터 스토어에 저장 → 상태 플래그 업데이트.
 2) **질의응답 흐름**  
    사용자 프롬프트 → 파라메터(K, 필터) 확인 → 벡터 검색 → 컨텍스트 패킹 →  
    LLM 호출(system + retrieval prompt) → 답변과 출처 마크다운 반환 → (옵션) 노트로 저장.
@@ -110,8 +110,8 @@ GitHub Copilot 에이전트가 작업 중 모든 설명과 메시지를 한국�
 ## 7. 저장소/컴포넌트
 - **구현 언어**: TypeScript(Node.js) 기준으로 개발
 - **파일 시스템**: Obsidian 볼트 원본(.md)
-- **메타데이터 DB**: SQLite (로컬 `~/.ovl/meta.db`)
-- **벡터 스토어**: 로컬 우선, 향후 원격 플러그 가능  
+- **메타데이터 스토어**: JSON 파일 (플러그인 데이터 디렉토리의 `meta.json`)
+- **벡터 스토어**: JSON 파일 (플러그인 데이터 디렉토리의 `vectors.json`)  
   - Chroma: 지속성, 멀티프로세스 접근, 디스크/원격 등 백엔드를 교체할 수 있는 플러그블 스토리지가 필요할 때 기본값  
   - FAISS: 메모리 사용을 줄인 단일 프로세스, 최대 성능이 필요할 때
 - **서비스 구성**:  
@@ -378,11 +378,11 @@ avgSimilarity: 0.892
   - [x] 볼트 전체 스캔 및 마크다운 파싱
   - [x] 프론트매터, 태그, 링크 추출
   - [x] 파일 변경 감지 (watch) 및 자동 재색인
-  - [x] SQLite 메타데이터 저장
+  - [x] JSON 메타데이터 저장
   
 - [x] **벡터 검색 구현**
   - [x] 로컬 임베딩 생성 (HuggingFace all-MiniLM-L6-v2)
-  - [x] 벡터 스토어 통합 (SQLite 기반)
+  - [x] 벡터 스토어 통합 (JSON 기반)
   - [x] 문서 청킹 (300~500 토큰 단위)
   - [x] Top-K 검색 (기본값: 8)
   
@@ -689,8 +689,8 @@ Obsidian-vault-llm/
 │   │   ├── parser.ts              # 마크다운 파싱 (frontmatter, 태그, 링크)
 │   │   ├── chunker.ts             # 텍스트 청킹 (문장 단위)
 │   │   ├── embeddings.ts          # 임베딩 생성 (Gemini, OpenAI, Local)
-│   │   ├── vectorStore.ts         # 벡터 저장 및 검색 (SQLite)
-│   │   ├── metadataStore.ts       # 메타데이터 저장 (SQLite)
+│   │   ├── vectorStore.ts         # 벡터 저장 및 검색 (JSON)
+│   │   ├── metadataStore.ts       # 메타데이터 저장 (JSON)
 │   │   └── types.ts               # 인덱싱 타입 정의
 │   ├── topicSeparation/           # 주제 분리 AI
 │   │   ├── topicSeparationEngine.ts  # 주제 분리 엔진 (코사인 유사도)
@@ -726,7 +726,7 @@ Obsidian-vault-llm/
 #### 주요 라이브러리
 - **@google/generative-ai** (^0.24.1): Gemini API 통합
 - **@xenova/transformers** (^2.17.2): 로컬 임베딩 생성 (HuggingFace 모델)
-- **better-sqlite3** (^12.6.2): 고성능 SQLite 데이터베이스
+- **Node.js fs/path**: 로컬 JSON 저장소 입출력 및 경로 관리
 - **chokidar** (^5.0.0): 파일 시스템 감시
 - **gray-matter** (^4.0.3): Frontmatter 파싱
 

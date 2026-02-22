@@ -1,206 +1,175 @@
-// SQLite 메타데이터 저장소
+// JSON 메타데이터 저장소
 
-import Database from "better-sqlite3";
-import { NoteMetadata, Chunk } from "./types";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from "fs";
+import { dirname } from "path";
+import { NoteMetadata, Chunk, MetadataStoreData } from "./types";
 
 export class MetadataStore {
-  private db: Database.Database;
+  private readonly storePath: string;
+  private data: MetadataStoreData;
 
-  constructor(dbPath: string) {
-    this.db = new Database(dbPath);
-    this.initializeSchema();
+  constructor(storePath: string, indexSignature: string) {
+    this.storePath = storePath;
+    this.data = this.loadData(indexSignature);
   }
 
   /**
-   * 데이터베이스 스키마 초기화
+   * 저장소 데이터 로드
    */
-  private initializeSchema(): void {
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS notes (
-        id TEXT PRIMARY KEY,
-        path TEXT UNIQUE NOT NULL,
-        title TEXT NOT NULL,
-        tags TEXT, -- JSON array
-        links TEXT, -- JSON array
-        frontmatter TEXT, -- JSON object
-        updated_at INTEGER NOT NULL,
-        hash TEXT NOT NULL
-      );
+  private loadData(indexSignature: string): MetadataStoreData {
+    if (!existsSync(this.storePath)) {
+      return {
+        indexSignature,
+        updatedAt: Date.now(),
+        notes: {},
+        chunks: {},
+      };
+    }
 
-      CREATE TABLE IF NOT EXISTS chunks (
-        id TEXT PRIMARY KEY,
-        note_id TEXT NOT NULL,
-        text TEXT NOT NULL,
-        position INTEGER NOT NULL,
-        token_count INTEGER NOT NULL,
-        section TEXT,
-        FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE
-      );
+    try {
+      const raw = readFileSync(this.storePath, "utf-8");
+      const parsed = JSON.parse(raw) as Partial<MetadataStoreData>;
+      return {
+        indexSignature: parsed.indexSignature || indexSignature,
+        updatedAt: typeof parsed.updatedAt === "number" ? parsed.updatedAt : Date.now(),
+        notes: parsed.notes || {},
+        chunks: parsed.chunks || {},
+      };
+    } catch (error) {
+      console.warn("메타데이터 저장소 로드 실패, 새로 초기화합니다:", error);
+      return {
+        indexSignature,
+        updatedAt: Date.now(),
+        notes: {},
+        chunks: {},
+      };
+    }
+  }
 
-      CREATE INDEX IF NOT EXISTS idx_notes_path ON notes(path);
-      CREATE INDEX IF NOT EXISTS idx_notes_updated_at ON notes(updated_at);
-      CREATE INDEX IF NOT EXISTS idx_chunks_note_id ON chunks(note_id);
-    `);
+  /**
+   * 저장소 데이터 저장 (원자적 쓰기)
+   */
+  private persist(): void {
+    mkdirSync(dirname(this.storePath), { recursive: true });
+    this.data.updatedAt = Date.now();
+
+    const tempPath = `${this.storePath}.tmp`;
+    writeFileSync(tempPath, JSON.stringify(this.data), "utf-8");
+    renameSync(tempPath, this.storePath);
+  }
+
+  /**
+   * 인덱스 시그니처 조회
+   */
+  getIndexSignature(): string {
+    return this.data.indexSignature;
+  }
+
+  /**
+   * 저장소 초기화
+   */
+  reset(indexSignature: string): void {
+    this.data = {
+      indexSignature,
+      updatedAt: Date.now(),
+      notes: {},
+      chunks: {},
+    };
+    this.persist();
   }
 
   /**
    * 노트 저장 또는 업데이트
    */
   upsertNote(note: NoteMetadata): void {
-    const stmt = this.db.prepare(`
-      INSERT INTO notes (id, path, title, tags, links, frontmatter, updated_at, hash)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        path = excluded.path,
-        title = excluded.title,
-        tags = excluded.tags,
-        links = excluded.links,
-        frontmatter = excluded.frontmatter,
-        updated_at = excluded.updated_at,
-        hash = excluded.hash
-    `);
-
-    stmt.run(
-      note.id,
-      note.path,
-      note.title,
-      JSON.stringify(note.tags),
-      JSON.stringify(note.links),
-      JSON.stringify(note.frontmatter),
-      note.updatedAt,
-      note.hash
-    );
+    this.data.notes[note.id] = { ...note };
+    this.persist();
   }
 
   /**
    * 경로로 노트 조회
    */
   getNoteByPath(path: string): NoteMetadata | null {
-    const stmt = this.db.prepare("SELECT * FROM notes WHERE path = ?");
-    const row = stmt.get(path) as any;
-    return row ? this.rowToNote(row) : null;
+    const note = Object.values(this.data.notes).find((item) => item.path === path);
+    return note ? { ...note } : null;
   }
 
   /**
    * ID로 노트 조회
    */
   getNoteById(id: string): NoteMetadata | null {
-    const stmt = this.db.prepare("SELECT * FROM notes WHERE id = ?");
-    const row = stmt.get(id) as any;
-    return row ? this.rowToNote(row) : null;
+    const note = this.data.notes[id];
+    return note ? { ...note } : null;
   }
 
   /**
    * 모든 노트 조회
    */
   getAllNotes(): NoteMetadata[] {
-    const stmt = this.db.prepare("SELECT * FROM notes ORDER BY updated_at DESC");
-    const rows = stmt.all() as any[];
-    return rows.map((row) => this.rowToNote(row));
+    return Object.values(this.data.notes)
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .map((note) => ({ ...note }));
   }
 
   /**
    * 노트 삭제
    */
   deleteNote(id: string): void {
-    const stmt = this.db.prepare("DELETE FROM notes WHERE id = ?");
-    stmt.run(id);
+    delete this.data.notes[id];
+    this.persist();
   }
 
   /**
    * 청크 저장
    */
   insertChunks(chunks: Chunk[]): void {
-    const stmt = this.db.prepare(`
-      INSERT INTO chunks (id, note_id, text, position, token_count, section)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
-
-    const transaction = this.db.transaction((chunks: Chunk[]) => {
-      for (const chunk of chunks) {
-        stmt.run(
-          chunk.id,
-          chunk.noteId,
-          chunk.text,
-          chunk.position,
-          chunk.tokenCount,
-          chunk.section
-        );
-      }
-    });
-
-    transaction(chunks);
+    for (const chunk of chunks) {
+      this.data.chunks[chunk.id] = { ...chunk };
+    }
+    this.persist();
   }
 
   /**
    * 노트의 청크 삭제
    */
   deleteChunksByNoteId(noteId: string): void {
-    const stmt = this.db.prepare("DELETE FROM chunks WHERE note_id = ?");
-    stmt.run(noteId);
+    for (const [chunkId, chunk] of Object.entries(this.data.chunks)) {
+      if (chunk.noteId === noteId) {
+        delete this.data.chunks[chunkId];
+      }
+    }
+    this.persist();
   }
 
   /**
    * 노트의 청크 조회
    */
   getChunksByNoteId(noteId: string): Chunk[] {
-    const stmt = this.db.prepare("SELECT * FROM chunks WHERE note_id = ? ORDER BY position");
-    const rows = stmt.all(noteId) as any[];
-    return rows.map((row) => this.rowToChunk(row));
+    return Object.values(this.data.chunks)
+      .filter((chunk) => chunk.noteId === noteId)
+      .sort((a, b) => a.position - b.position)
+      .map((chunk) => ({ ...chunk }));
   }
 
   /**
    * ID로 청크 조회
    */
   getChunkById(id: string): Chunk | null {
-    const stmt = this.db.prepare("SELECT * FROM chunks WHERE id = ?");
-    const row = stmt.get(id) as any;
-    return row ? this.rowToChunk(row) : null;
+    const chunk = this.data.chunks[id];
+    return chunk ? { ...chunk } : null;
   }
 
   /**
    * 모든 청크 조회
    */
   getAllChunks(): Chunk[] {
-    const stmt = this.db.prepare("SELECT * FROM chunks");
-    const rows = stmt.all() as any[];
-    return rows.map((row) => this.rowToChunk(row));
+    return Object.values(this.data.chunks).map((chunk) => ({ ...chunk }));
   }
 
   /**
    * 데이터베이스 닫기
    */
   close(): void {
-    this.db.close();
-  }
-
-  /**
-   * DB 행을 NoteMetadata로 변환
-   */
-  private rowToNote(row: any): NoteMetadata {
-    return {
-      id: row.id,
-      path: row.path,
-      title: row.title,
-      tags: JSON.parse(row.tags || "[]"),
-      links: JSON.parse(row.links || "[]"),
-      frontmatter: JSON.parse(row.frontmatter || "{}"),
-      updatedAt: row.updated_at,
-      hash: row.hash,
-    };
-  }
-
-  /**
-   * DB 행을 Chunk로 변환
-   */
-  private rowToChunk(row: any): Chunk {
-    return {
-      id: row.id,
-      noteId: row.note_id,
-      text: row.text,
-      position: row.position,
-      tokenCount: row.token_count,
-      section: row.section,
-    };
+    // 파일 기반 저장소는 close 동작이 필요하지 않습니다.
   }
 }

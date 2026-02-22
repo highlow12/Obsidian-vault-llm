@@ -4,6 +4,8 @@ export * from "./types";
 export * from "./parser";
 export * from "./chunker";
 export * from "./embeddings";
+export * from "./vectorIndex";
+export * from "./vectorIndexFactory";
 export * from "./metadataStore";
 export * from "./vectorStore";
 export * from "./indexer";

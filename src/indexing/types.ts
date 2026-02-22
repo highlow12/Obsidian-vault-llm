@@ -38,14 +38,29 @@ export interface SearchFilter {
   };
 }
 
+export interface VectorStoreData {
+  indexSignature: string;
+  dimension: number | null;
+  updatedAt: number;
+  embeddings: Record<string, number[]>;
+}
+
+export interface MetadataStoreData {
+  indexSignature: string;
+  updatedAt: number;
+  notes: Record<string, NoteMetadata>;
+  chunks: Record<string, Chunk>;
+}
+
 export interface IndexingConfig {
   chunkSize: number;
   chunkOverlap: number;
   topK: number;
+  vectorIndexEngine?: "json" | "hnsw";
   embeddingProvider: "gemini" | "openai" | "local" | "custom";
   embeddingModel: string;
   embeddingApiKey?: string;
   embeddingApiUrl?: string;
-  metaDbPath: string;
-  vectorDbPath: string;
+  metaStorePath: string;
+  vectorStorePath: string;
 }
