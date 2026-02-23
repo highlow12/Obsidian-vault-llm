@@ -674,66 +674,107 @@ ${context}`;
 
       new Notice("대화를 주제별로 분석하는 중...");
 
-      // 단일 LLM 호출로 주제 분리 및 문서 생성
-      const topicDocs = await this.separateTopicsWithLLM(this.messages);
+      const outputFolder = this.plugin.settings.defaultOutputFolder;
 
-      if (topicDocs.length > 1) {
-        // 여러 주제로 분리됨
-        for (let topicIndex = 0; topicIndex < topicDocs.length; topicIndex++) {
-          const doc = topicDocs[topicIndex];
-          const docTitle = `${finalSessionId} - ${topicIndex + 1}. ${doc.title}`;
-          await this.plugin.saveConversationFromTurns(
-            docTitle,
-            [{ role: "assistant", content: doc.content, timestamp: new Date().toISOString() }],
-            this.plugin.settings.defaultOutputFolder
-          );
-        }
-        new Notice(`${topicDocs.length}개의 주제로 분리하여 저장 완료!`);
-        this.resetSession();
-        return;
-      }
-
-      if (topicDocs.length === 1) {
-        // 단일 주제
-        const targetPath = await this.plugin.saveConversationFromTurns(
-          finalSessionId,
-          [{ role: "assistant", content: topicDocs[0].content, timestamp: new Date().toISOString() }],
-          this.plugin.settings.defaultOutputFolder
-        );
-        new Notice(`저장 완료: ${targetPath}`);
-        this.resetSession();
-        return;
-      }
-
-      // LLM 응답 파싱 실패 시 기존 위키 요약 방식으로 폴백
-      new Notice("주제 분리 실패. 일반 방식으로 저장합니다.");
-      const summaryPrompt = this.buildWikiSummaryPrompt(this.messages);
-      let summary = await this.plugin.requestAssistantReply([
-        { role: "user", content: summaryPrompt, timestamp: new Date().toISOString() }
+      // LLM 방식과 임베딩 방식을 동시에 실행
+      const [llmResult, embeddingResult] = await Promise.allSettled([
+        this.runLlmTopicSeparation(finalSessionId, outputFolder),
+        this.runEmbeddingTopicSeparation(finalSessionId, outputFolder)
       ]);
-      summary = this.cleanSummary(summary);
 
-      if (this.isSummaryTooShort(summary)) {
-        const retryPrompt = this.buildWikiSummaryPrompt(this.messages, true);
-        summary = await this.plugin.requestAssistantReply([
-          { role: "user", content: retryPrompt, timestamp: new Date().toISOString() }
-        ]);
-        summary = this.cleanSummary(summary);
+      let anySuccess = false;
+
+      if (llmResult.status === "fulfilled") {
+        new Notice(`LLM 방식 저장 완료! (${llmResult.value}개 파일)`);
+        anySuccess = true;
+      } else {
+        const msg = llmResult.reason instanceof Error ? llmResult.reason.message : String(llmResult.reason);
+        new Notice(`LLM 방식 저장 실패: ${msg}`);
       }
 
-      const targetPath = await this.plugin.saveConversationFromTurns(
-        finalSessionId,
-        [{ role: "assistant", content: summary, timestamp: new Date().toISOString() }],
-        this.plugin.settings.defaultOutputFolder
-      );
-      new Notice(`위키 요약 저장 완료: ${targetPath}`);
-      this.resetSession();
+      if (embeddingResult.status === "fulfilled") {
+        new Notice(`임베딩 방식 저장 완료! (${embeddingResult.value}개 파일)`);
+        anySuccess = true;
+      } else {
+        const msg = embeddingResult.reason instanceof Error ? embeddingResult.reason.message : String(embeddingResult.reason);
+        new Notice(`임베딩 방식 저장 실패: ${msg}`);
+      }
+
+      if (anySuccess) {
+        this.resetSession();
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       new Notice(`저장 실패: ${message}`);
     } finally {
       this.setBusyState({ isBusy: false });
     }
+  }
+
+  /**
+   * LLM 방식으로 주제 분리 후 저장합니다 (파일명에 'llm' 접미사 사용)
+   */
+  private async runLlmTopicSeparation(finalSessionId: string, outputFolder: string): Promise<number> {
+    const llmBaseTitle = `${finalSessionId}(llm)`;
+    const topicDocs = await this.separateTopicsWithLLM(this.messages);
+
+    if (topicDocs.length > 1) {
+      for (let topicIndex = 0; topicIndex < topicDocs.length; topicIndex++) {
+        const doc = topicDocs[topicIndex];
+        const docTitle = `${llmBaseTitle} - ${topicIndex + 1}. ${doc.title}`;
+        await this.plugin.saveConversationFromTurns(
+          docTitle,
+          [{ role: "assistant", content: doc.content, timestamp: new Date().toISOString() }],
+          outputFolder
+        );
+      }
+      return topicDocs.length;
+    }
+
+    if (topicDocs.length === 1) {
+      await this.plugin.saveConversationFromTurns(
+        llmBaseTitle,
+        [{ role: "assistant", content: topicDocs[0].content, timestamp: new Date().toISOString() }],
+        outputFolder
+      );
+      return 1;
+    }
+
+    // LLM 응답 파싱 실패 시 기존 위키 요약 방식으로 폴백
+    const summaryPrompt = this.buildWikiSummaryPrompt(this.messages);
+    let summary = await this.plugin.requestAssistantReply([
+      { role: "user", content: summaryPrompt, timestamp: new Date().toISOString() }
+    ]);
+    summary = this.cleanSummary(summary);
+
+    if (this.isSummaryTooShort(summary)) {
+      const retryPrompt = this.buildWikiSummaryPrompt(this.messages, true);
+      summary = await this.plugin.requestAssistantReply([
+        { role: "user", content: retryPrompt, timestamp: new Date().toISOString() }
+      ]);
+      summary = this.cleanSummary(summary);
+    }
+
+    await this.plugin.saveConversationFromTurns(
+      llmBaseTitle,
+      [{ role: "assistant", content: summary, timestamp: new Date().toISOString() }],
+      outputFolder
+    );
+    return 1;
+  }
+
+  /**
+   * 임베딩 방식으로 주제 분리 후 저장합니다 (파일명에 '임베딩' 접미사 사용)
+   */
+  private async runEmbeddingTopicSeparation(finalSessionId: string, outputFolder: string): Promise<number> {
+    const embeddingBaseTitle = `${finalSessionId}(임베딩)`;
+    const result = await this.plugin.saveWithEmbeddingTopicSeparation(
+      this.messages,
+      embeddingBaseTitle,
+      outputFolder
+    );
+    // 세그먼트 파일들(notePaths) + 인덱스 파일(mainNotePath)
+    return result.notePaths.length + 1;
   }
 
   private resetSession(): void {
