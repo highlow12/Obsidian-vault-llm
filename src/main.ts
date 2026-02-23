@@ -14,8 +14,6 @@ import { VaultWatcher } from "./vaultWatcher";
 import { join } from "path";
 import type { AssistantReplyStreamOptions } from "./pluginApi";
 import { deleteChatSession, listChatSessions, loadChatSession, saveChatSession } from "./chatSessionStore";
-import { TopicSeparationEngine, saveSegmentsAsNotes } from "./topicSeparation";
-import type { MultiNoteSaveResult } from "./topicSeparation";
 
 export default class OvlPlugin extends Plugin {
   public settings: OvlSettings = { ...DEFAULT_SETTINGS };
@@ -275,38 +273,6 @@ export default class OvlPlugin extends Plugin {
 
   public async deleteChatSession(sessionId: string): Promise<void> {
     await deleteChatSession(this.app.vault, sessionId);
-  }
-
-  /**
-   * 임베딩 기반 주제 분리 후 노트로 저장합니다
-   */
-  public async saveWithEmbeddingTopicSeparation(
-    turns: ConversationTurn[],
-    baseTitle: string,
-    outputFolder: string
-  ): Promise<MultiNoteSaveResult> {
-    const apiKey = this.settings.embeddingApiKey || this.settings.apiKey;
-    const embeddingModel = this.settings.embeddingModel;
-
-    const engine = new TopicSeparationEngine({
-      apiKey,
-      embeddingModel,
-      similarityThreshold: this.settings.saveSimilarityThreshold,
-      app: this.app,
-      manifest: this.manifest
-    });
-
-    const result = await engine.separateTopics(turns);
-
-    return saveSegmentsAsNotes(
-      this.app.vault,
-      result.segments,
-      result.links,
-      baseTitle,
-      outputFolder,
-      this.app,
-      this.manifest
-    );
   }
 
   private async loadSettings(): Promise<void> {
