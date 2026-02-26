@@ -66,6 +66,31 @@ export class OvlApiClient {
     });
   }
 
+  async requestSummaryReply(prompt: string): Promise<string> {
+    const settings = this.getSettings();
+    const summaryModel = settings.summaryModel.trim();
+    const modelName = summaryModel || settings.model.trim();
+    const turns: ConversationTurn[] = [
+      {
+        role: "user",
+        content: prompt,
+        timestamp: new Date().toISOString()
+      }
+    ];
+
+    if (settings.provider === "gemini") {
+      return this.requestGeminiReply(settings, turns, {
+        modelName,
+        systemPrompt: ""
+      });
+    }
+
+    return this.requestOpenAiCompatibleReply(settings, turns, {
+      modelName,
+      systemPrompt: ""
+    });
+  }
+
   private async requestOpenAiCompatibleReply(
     settings: OvlSettings,
     turns: ConversationTurn[],

@@ -708,16 +708,12 @@ ${context}`;
       // LLM 응답 파싱 실패 시 기존 위키 요약 방식으로 폴백
       new Notice("주제 분리 실패. 일반 방식으로 저장합니다.");
       const summaryPrompt = this.buildWikiSummaryPrompt(this.messages);
-      let summary = await this.plugin.requestAssistantReply([
-        { role: "user", content: summaryPrompt, timestamp: new Date().toISOString() }
-      ]);
+      let summary = await this.plugin.requestSummaryReply(summaryPrompt);
       summary = this.cleanSummary(summary);
 
       if (this.isSummaryTooShort(summary)) {
         const retryPrompt = this.buildWikiSummaryPrompt(this.messages, true);
-        summary = await this.plugin.requestAssistantReply([
-          { role: "user", content: retryPrompt, timestamp: new Date().toISOString() }
-        ]);
+        summary = await this.plugin.requestSummaryReply(retryPrompt);
         summary = this.cleanSummary(summary);
       }
 
