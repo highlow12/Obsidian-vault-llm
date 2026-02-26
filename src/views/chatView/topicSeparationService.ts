@@ -3,6 +3,7 @@ import type { PluginChatApi } from "../../pluginApi";
 import type { ChatPromptBuilder } from "./promptBuilder";
 import type { ChatTextSanitizer } from "./textSanitizer";
 import { appendLlmInputLog } from "../../logging";
+import { TopicSeparationEngine, saveSegmentsAsNotes } from "../../topicSeparation";
 
 export class ChatTopicSeparationService {
   constructor(
@@ -133,17 +134,49 @@ export class ChatTopicSeparationService {
     return 1;
   }
 
+  /**
+   * 임베딩/키워드 기반 주제 분리 후 저장합니다 (fed909fc 버전 로직)
+   *
+   * 다중 주제가 발견된 경우에만 저장하고 세그먼트 수를 반환합니다.
+   * 단일 주제인 경우 0을 반환하며, 호출자가 위키 요약으로 폴백해야 합니다.
+   */
   async runEmbeddingTopicSeparation(
     turns: ConversationTurn[],
     finalSessionId: string,
     outputFolder: string
   ): Promise<number> {
-    const embeddingBaseTitle = `${finalSessionId}(임베딩)`;
-    const result = await this.plugin.saveWithEmbeddingTopicSeparation(
-      turns,
-      embeddingBaseTitle,
-      outputFolder
-    );
-    return result.notePaths.length + 1;
+    const engine = new TopicSeparationEngine({
+      apiKey: this.plugin.settings.embeddingApiKey || this.plugin.settings.apiKey,
+      embeddingModel: this.plugin.settings.embeddingModel,
+      similarityThreshold: this.plugin.settings.saveSimilarityThreshold,
+      minSegmentLength: 2,
+      windowSize: 2,
+      enableKeywordMetadata: true,
+      app: this.plugin.app,
+      manifest: this.plugin.manifest,
+      enableEmbeddingLogging: true
+    });
+
+    try {
+      const result = await engine.separateTopics(turns);
+      console.log(`주제 분리 완료: ${result.segments.length}개 세그먼트 감지`);
+
+      if (result.segments.length > 1) {
+        await saveSegmentsAsNotes(
+          this.plugin.app.vault,
+          result.segments,
+          result.links,
+          finalSessionId,
+          outputFolder,
+          this.plugin.app,
+          this.plugin.manifest
+        );
+        return result.segments.length;
+      }
+
+      return 0;
+    } finally {
+      engine.clearCache();
+    }
   }
 }

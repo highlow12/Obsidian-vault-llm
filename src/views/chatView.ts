@@ -10,6 +10,8 @@ import { ChatTopicSeparationService } from "./chatView/topicSeparationService";
 import { ChatSessionManager } from "./chatView/sessionManager";
 
 export const VIEW_TYPE_OVL_CHAT = "ovl-chat-view";
+/** 임베딩/LLM 주제 분리를 시도하는 최소 대화 턴 수 */
+const MIN_TURNS_FOR_TOPIC_SEPARATION = 2;
 
 export class ChatView extends ItemView {
   private readonly plugin: PluginChatApi;
@@ -403,46 +405,62 @@ export class ChatView extends ItemView {
         this.sessionIdEl.value = conversationTitle;
       }
 
-      new Notice("대화를 주제별로 분석하는 중...");
-
       const outputFolder = this.plugin.settings.defaultOutputFolder;
       const currentMessages = this.messageRenderer.getMessages();
 
-      // LLM 방식과 임베딩 방식을 동시에 실행
-      const [llmResult, embeddingResult] = await Promise.allSettled([
-        this.topicSeparationService.runLlmTopicSeparation(
-          currentMessages,
-          finalSessionId,
-          outputFolder
-        ),
-        this.topicSeparationService.runEmbeddingTopicSeparation(
-          currentMessages,
-          finalSessionId,
-          outputFolder
-        )
-      ]);
+      // 2턴 이상이고 API 키가 있을 때 LLM + 임베딩 동시 주제 분리 시도
+      const enableTopicSeparation = currentMessages.length >= MIN_TURNS_FOR_TOPIC_SEPARATION &&
+        (this.plugin.settings.embeddingApiKey || this.plugin.settings.apiKey);
 
-      let anySuccess = false;
+      if (enableTopicSeparation) {
+        new Notice("대화를 주제별로 분석하는 중...");
 
-      if (llmResult.status === "fulfilled") {
-        new Notice(`LLM 방식 저장 완료! (${llmResult.value}개 파일)`);
-        anySuccess = true;
-      } else {
-        const msg = llmResult.reason instanceof Error ? llmResult.reason.message : String(llmResult.reason);
-        new Notice(`LLM 방식 저장 실패: ${msg}`);
+        // LLM 방식과 임베딩 방식을 동시에 실행
+        const [llmResult, embeddingResult] = await Promise.allSettled([
+          this.topicSeparationService.runLlmTopicSeparation(
+            currentMessages,
+            finalSessionId,
+            outputFolder
+          ),
+          this.topicSeparationService.runEmbeddingTopicSeparation(
+            currentMessages,
+            finalSessionId,
+            outputFolder
+          )
+        ]);
+
+        let anySuccess = false;
+
+        if (llmResult.status === "fulfilled") {
+          new Notice(`LLM 방식 저장 완료! (${llmResult.value}개 파일)`);
+          anySuccess = true;
+        } else {
+          const msg = llmResult.reason instanceof Error ? llmResult.reason.message : String(llmResult.reason);
+          new Notice(`LLM 방식 저장 실패: ${msg}`);
+        }
+
+        if (embeddingResult.status === "fulfilled") {
+          new Notice(`임베딩 방식 저장 완료! (${embeddingResult.value}개 파일)`);
+          anySuccess = true;
+        } else {
+          const msg = embeddingResult.reason instanceof Error ? embeddingResult.reason.message : String(embeddingResult.reason);
+          new Notice(`임베딩 방식 저장 실패: ${msg}`);
+        }
+
+        if (anySuccess) {
+          this.resetSession();
+        }
+        return;
       }
 
-      if (embeddingResult.status === "fulfilled") {
-        new Notice(`임베딩 방식 저장 완료! (${embeddingResult.value}개 파일)`);
-        anySuccess = true;
-      } else {
-        const msg = embeddingResult.reason instanceof Error ? embeddingResult.reason.message : String(embeddingResult.reason);
-        new Notice(`임베딩 방식 저장 실패: ${msg}`);
-      }
-
-      if (anySuccess) {
-        this.resetSession();
-      }
+      // 턴 수 부족 또는 API 키 없음 → 위키 요약 저장으로 폴백
+      const fileCount = await this.topicSeparationService.runLlmTopicSeparation(
+        currentMessages,
+        finalSessionId,
+        outputFolder
+      );
+      new Notice(`저장 완료! (${fileCount}개 파일)`);
+      this.resetSession();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       new Notice(`저장 실패: ${message}`);

@@ -1,7 +1,7 @@
 import type { ConversationTurn } from "./conversation";
 import type { OvlSettings } from "./types";
 import type { Chunk, NoteMetadata } from "./indexing/types";
-import type { PluginManifest } from "obsidian";
+import type { App, PluginManifest } from "obsidian";
 import type { ChatSessionSummary } from "./chatSessionStore";
 import type { MultiNoteSaveResult } from "./topicSeparation";
 
@@ -18,6 +18,7 @@ export type AssistantTokenUsage = {
 };
 
 export type PluginChatApi = {
+  app: App;
   manifest: PluginManifest;
   settings: OvlSettings;
   requestAssistantReply: (turns: ConversationTurn[]) => Promise<string>;
