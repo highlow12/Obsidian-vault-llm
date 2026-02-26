@@ -2,7 +2,6 @@
  * 벡터 임베딩 및 유사도 계산 모듈
  */
 
-import type { App, PluginManifest } from 'obsidian';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 /**
@@ -41,21 +40,11 @@ export class EmbeddingGenerator {
   private genAI: GoogleGenerativeAI | null = null;
   private model: any = null;
   private cache: Map<string, number[]> = new Map();
-  private lastEmbedding: number[] | null = null;
-  private lastText: string = '';
 
-  constructor(
-    private apiKey: string,
-    private modelName: string = 'embedding-001',
-    private app?: App,
-    private manifest?: PluginManifest,
-    private enableLogging: boolean = false
-  ) {
+  constructor(private apiKey: string) {
     if (apiKey) {
       this.genAI = new GoogleGenerativeAI(apiKey);
-      // models/ 접두사 제거
-      const cleanModelName = this.modelName.replace(/^models\//, '');
-      this.model = this.genAI.getGenerativeModel({ model: cleanModelName });
+      this.model = this.genAI.getGenerativeModel({ model: 'embedding-001' });
     }
   }
 
@@ -69,60 +58,23 @@ export class EmbeddingGenerator {
       throw new Error('Gemini API가 초기화되지 않았습니다');
     }
 
-    let embedding: number[] | undefined;
-
     // 캐시 확인
     if (this.cache.has(text)) {
-      embedding = this.cache.get(text)!;
-    } else {
-      try {
-        const result = await this.model.embedContent(text);
-        const values = result?.embedding?.values;
-        if (!Array.isArray(values) || values.length === 0) {
-          throw new Error('임베딩 응답이 비어 있습니다');
-        }
-        embedding = values;
-
-        // 캐시에 저장
-        this.cache.set(text, embedding);
-      } catch (error) {
-        console.error('임베딩 생성 실패:', error);
-        throw new Error(`임베딩 생성 실패: ${error instanceof Error ? error.message : String(error)}`);
-      }
+      return this.cache.get(text)!;
     }
 
-    if (!embedding) {
-      throw new Error('임베딩 생성 결과가 없습니다');
+    try {
+      const result = await this.model.embedContent(text);
+      const embedding = result.embedding.values;
+
+      // 캐시에 저장
+      this.cache.set(text, embedding);
+
+      return embedding;
+    } catch (error) {
+      console.error('임베딩 생성 실패:', error);
+      throw new Error(`임베딩 생성 실패: ${error instanceof Error ? error.message : String(error)}`);
     }
-
-    // 로깅 처리 - 모든 임베딩(캐시 포함)을 로깅
-    if (this.enableLogging && this.app) {
-      try {
-        const { appendEmbeddingLog } = await import('../logging');
-        let similarity: number | undefined;
-        let previousText: string | undefined;
-
-        if (this.lastEmbedding) {
-          similarity = cosineSimilarity(this.lastEmbedding, embedding);
-          previousText = this.lastText;
-        }
-
-        await appendEmbeddingLog(this.app, this.manifest, {
-          inputText: text,
-          embedding,
-          similarity,
-          previousInputText: previousText
-        });
-      } catch (logError) {
-        console.error('임베딩 로그 작성 실패:', logError);
-      }
-    }
-
-    // 마지막 임베딩 업데이트
-    this.lastEmbedding = embedding;
-    this.lastText = text;
-
-    return embedding;
   }
 
   /**

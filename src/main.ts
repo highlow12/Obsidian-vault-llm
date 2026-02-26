@@ -455,14 +455,10 @@ export default class OvlPlugin extends Plugin {
     outputFolder: string
   ) {
     const apiKey = this.settings.embeddingApiKey || this.settings.apiKey;
-    const embeddingModel = this.settings.embeddingModel;
 
     const engine = new TopicSeparationEngine({
       apiKey,
-      embeddingModel,
-      similarityThreshold: this.settings.saveSimilarityThreshold,
-      app: this.app,
-      manifest: this.manifest
+      similarityThreshold: this.settings.saveSimilarityThreshold
     });
 
     const result = await engine.separateTopics(turns);
