@@ -26,6 +26,7 @@ export type PluginChatApi = {
     options: AssistantReplyStreamOptions
   ) => Promise<string>;
   requestTitleReply: (prompt: string) => Promise<string>;
+  requestSummaryReply: (prompt: string) => Promise<string>;
   saveConversationFromTurns: (
     sessionId: string,
     turns: ConversationTurn[],

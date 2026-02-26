@@ -1,5 +1,6 @@
 import type { App, PluginManifest } from "obsidian";
 import { normalizePath } from "obsidian";
+import type { ConversationTurn } from "./conversation";
 
 // main.js가 있는 플러그인 실제 경로를 찾아서 로그 파일 경로 반환
 export function getPluginLogPath(app: App, manifest?: PluginManifest): string {
@@ -108,6 +109,53 @@ export async function appendTopicSeparationFailureLog(
     }
   } catch (error) {
     console.error('[주제 분리 실패 로그] 파일 쓰기 실패:', error);
+  }
+}
+
+export type LlmInputLogSource = "send" | "vault-search" | "save-summary" | "save-topic";
+
+export interface LlmInputLogData {
+  source: LlmInputLogSource;
+  systemPrompt?: string;
+  turns: ConversationTurn[];
+}
+
+export async function appendLlmInputLog(
+  app: App,
+  manifest: PluginManifest | undefined,
+  data: LlmInputLogData
+): Promise<void> {
+  const logPath = getPluginLogPath(app, manifest);
+  const timestamp = new Date().toISOString();
+  const sourceLabel =
+    data.source === "vault-search" ? "볼트 검색 답변" :
+    data.source === "save-summary" ? "저장 요약" :
+    data.source === "save-topic" ? "저장 주제 분리" :
+    "전송";
+
+  let entry = `\n[${timestamp}] [LLM 입력] 경로: ${sourceLabel}\n`;
+
+  const systemPrompt = data.systemPrompt?.trim();
+  if (systemPrompt) {
+    entry += `[system:설정]\n${systemPrompt}\n`;
+  }
+
+  for (const turn of data.turns) {
+    entry += `[${turn.role}]\n${turn.content}\n`;
+  }
+
+  entry += "---\n";
+
+  try {
+    const exists = await app.vault.adapter.exists(logPath);
+    if (exists) {
+      const current = await app.vault.adapter.read(logPath);
+      await app.vault.adapter.write(logPath, `${entry}${current}`);
+    } else {
+      await app.vault.adapter.write(logPath, entry.trimStart());
+    }
+  } catch (error) {
+    console.error("[LLM 입력 로그] 파일 쓰기 실패:", error);
   }
 }
 
