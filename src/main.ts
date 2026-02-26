@@ -14,6 +14,7 @@ import { VaultWatcher } from "./vaultWatcher";
 import { join } from "path";
 import type { AssistantReplyStreamOptions } from "./pluginApi";
 import { deleteChatSession, listChatSessions, loadChatSession, saveChatSession } from "./chatSessionStore";
+import { TopicSeparationEngine, saveSegmentsAsNotes } from "./topicSeparation";
 
 export default class OvlPlugin extends Plugin {
   public settings: OvlSettings = { ...DEFAULT_SETTINGS };
@@ -448,6 +449,35 @@ export default class OvlPlugin extends Plugin {
     return preset?.apiUrl;
   }
 
+  public async saveWithEmbeddingTopicSeparation(
+    turns: ConversationTurn[],
+    baseTitle: string,
+    outputFolder: string
+  ) {
+    const apiKey = this.settings.embeddingApiKey || this.settings.apiKey;
+    const embeddingModel = this.settings.embeddingModel;
+
+    const engine = new TopicSeparationEngine({
+      apiKey,
+      embeddingModel,
+      similarityThreshold: this.settings.saveSimilarityThreshold,
+      app: this.app,
+      manifest: this.manifest
+    });
+
+    const result = await engine.separateTopics(turns);
+
+    return saveSegmentsAsNotes(
+      this.app.vault,
+      result.segments,
+      result.links,
+      baseTitle,
+      outputFolder,
+      this.app,
+      this.manifest
+    );
+  }
+
   /**
    * 인덱서 재초기화가 필요한 설정 변경인지 확인
    */
@@ -459,3 +489,4 @@ export default class OvlPlugin extends Plugin {
     );
   }
 }
+
