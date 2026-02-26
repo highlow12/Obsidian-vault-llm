@@ -10,6 +10,8 @@ import { ChatTopicSeparationService } from "./chatView/topicSeparationService";
 import { ChatSessionManager } from "./chatView/sessionManager";
 
 export const VIEW_TYPE_OVL_CHAT = "ovl-chat-view";
+/** 임베딩 주제 분리를 시도하는 최소 대화 턴 수 */
+const MIN_TURNS_FOR_TOPIC_SEPARATION = 4;
 
 export class ChatView extends ItemView {
   private readonly plugin: PluginChatApi;
@@ -406,8 +408,8 @@ export class ChatView extends ItemView {
       const outputFolder = this.plugin.settings.defaultOutputFolder;
       const currentMessages = this.messageRenderer.getMessages();
 
-      // 대화가 4턴 이상이고 API 키가 있을 때 임베딩 주제 분리 시도 (fed909fc 방식)
-      const enableTopicSeparation = currentMessages.length >= 4 &&
+      // 대화가 충분하고 API 키가 있을 때 임베딩 주제 분리 시도 (fed909fc 방식)
+      const enableTopicSeparation = currentMessages.length >= MIN_TURNS_FOR_TOPIC_SEPARATION &&
         (this.plugin.settings.embeddingApiKey || this.plugin.settings.apiKey);
 
       if (enableTopicSeparation) {
