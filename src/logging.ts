@@ -1,9 +1,17 @@
 import type { App, PluginManifest } from "obsidian";
 import { normalizePath } from "obsidian";
 
+// main.js가 있는 플러그인 실제 경로를 찾아서 로그 파일 경로 반환
 export function getPluginLogPath(app: App, manifest?: PluginManifest): string {
+  // 플러그인 ID 기본값
   const pluginId = manifest?.id ?? "obsidian-vault-llm";
-  return normalizePath(`${app.vault.configDir}/plugins/${pluginId}/log.txt`);
+  
+  // 실제 플러그인 폴더 경로: .obsidian/plugins/{pluginId}
+  const pluginsDir = normalizePath(`${app.vault.configDir}/plugins`);
+  const pluginDir = normalizePath(`${pluginsDir}/${pluginId}`);
+  
+  // 로그 파일은 플러그인 디렉토리에 직접 생성
+  return normalizePath(`${pluginDir}/log.txt`);
 }
 
 export async function appendErrorLog(
