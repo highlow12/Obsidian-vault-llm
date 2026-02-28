@@ -1,4 +1,4 @@
-import type { Vault } from "obsidian";
+import type { Vault, TFile } from "obsidian";
 import type { ConversationTurn } from "./conversation";
 
 type SanitizedGenerationLog = NonNullable<ConversationTurn["generationLog"]>;
@@ -36,9 +36,9 @@ export async function saveChatSession(
     updatedAt: new Date().toISOString()
   };
 
-  const exists = await vault.adapter.exists(path);
-  if (exists) {
-    await vault.adapter.write(path, JSON.stringify(payload, null, 2));
+  const existingFile = vault.getFileByPath(path);
+  if (existingFile) {
+    await vault.modify(existingFile, JSON.stringify(payload, null, 2));
   } else {
     await vault.create(path, JSON.stringify(payload, null, 2));
   }
@@ -50,9 +50,14 @@ export async function listChatSessions(vault: Vault): Promise<ChatSessionSummary
   const files = await listSessionFiles(vault);
   const summaries: ChatSessionSummary[] = [];
 
-  for (const file of files) {
+  for (const filePath of files) {
     try {
-      const raw = await vault.adapter.read(file);
+      const tFile = vault.getFileByPath(filePath);
+      if (!tFile) {
+        console.warn(`세션 파일을 찾을 수 없습니다: ${filePath}`);
+        continue;
+      }
+      const raw = await vault.cachedRead(tFile);
       const parsed = JSON.parse(raw) as Partial<StoredChatSession>;
       const sessionId = typeof parsed.sessionId === "string" ? parsed.sessionId.trim() : "";
       if (!sessionId) {
@@ -103,7 +108,10 @@ export async function deleteChatSession(vault: Vault, sessionId: string): Promis
     throw new Error("삭제할 대화 기록을 찾지 못했습니다.");
   }
 
-  await vault.adapter.remove(session.path);
+  const file = vault.getAbstractFileByPath(session.path);
+  if (file) {
+    await vault.trash(file, true);
+  }
 }
 
 function sanitizeTurns(turns: unknown): ConversationTurn[] {
@@ -220,14 +228,19 @@ async function findSessionFileById(
   sessionId: string
 ): Promise<{ path: string; parsed: Partial<StoredChatSession> } | null> {
   const files = await listSessionFiles(vault);
-  for (const file of files) {
+  for (const filePath of files) {
     try {
-      const raw = await vault.adapter.read(file);
+      const tFile = vault.getFileByPath(filePath);
+      if (!tFile) {
+        console.warn(`세션 파일을 찾을 수 없습니다: ${filePath}`);
+        continue;
+      }
+      const raw = await vault.cachedRead(tFile);
       const parsed = JSON.parse(raw) as Partial<StoredChatSession>;
       if (parsed.sessionId !== sessionId) {
         continue;
       }
-      return { path: file, parsed };
+      return { path: filePath, parsed };
     } catch {
       continue;
     }
@@ -246,8 +259,7 @@ async function ensureFolderExists(vault: Vault, folder: string): Promise<void> {
   let current = "";
   for (const segment of segments) {
     current = current ? `${current}/${segment}` : segment;
-    const exists = await vault.adapter.exists(current);
-    if (!exists) {
+    if (!vault.getFolderByPath(current)) {
       await vault.createFolder(current);
     }
   }

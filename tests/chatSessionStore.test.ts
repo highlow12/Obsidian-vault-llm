@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { Vault } from "obsidian";
+import type { Vault, TFile, TAbstractFile } from "obsidian";
 import { deleteChatSession, listChatSessions, loadChatSession, saveChatSession } from "../src/chatSessionStore";
 import type { ConversationTurn } from "../src/conversation";
 
@@ -14,19 +14,33 @@ function createMemoryVault(): MemoryVault {
   const folders = new Set<string>();
 
   const vault = {
+    // 상위 Vault API
+    getFileByPath(path: string): TFile | null {
+      return files.has(path) ? ({ path } as unknown as TFile) : null;
+    },
+    getAbstractFileByPath(path: string): TAbstractFile | null {
+      return files.has(path) || folders.has(path) ? ({ path } as unknown as TAbstractFile) : null;
+    },
+    getFolderByPath(path: string): { children: never[] } | null {
+      return folders.has(path) ? { children: [] } : null;
+    },
+    async cachedRead(file: TFile): Promise<string> {
+      const value = files.get(file.path);
+      if (typeof value !== "string") {
+        throw new Error(`파일이 없습니다: ${file.path}`);
+      }
+      return value;
+    },
+    async modify(file: TFile, content: string): Promise<void> {
+      files.set(file.path, content);
+    },
+    async trash(file: TAbstractFile, _system: boolean): Promise<void> {
+      files.delete(file.path);
+    },
+    // adapter는 listSessionFiles에서 사용됩니다
     adapter: {
       async exists(path: string): Promise<boolean> {
         return files.has(path) || folders.has(path);
-      },
-      async write(path: string, content: string): Promise<void> {
-        files.set(path, content);
-      },
-      async read(path: string): Promise<string> {
-        const value = files.get(path);
-        if (typeof value !== "string") {
-          throw new Error(`파일이 없습니다: ${path}`);
-        }
-        return value;
       },
       async list(path: string): Promise<{ files: string[]; folders: string[] }> {
         const prefix = `${path}/`;
@@ -34,13 +48,11 @@ function createMemoryVault(): MemoryVault {
           files: [...files.keys()].filter((item) => item.startsWith(prefix)),
           folders: [...folders.values()].filter((item) => item.startsWith(prefix))
         };
-      },
-      async remove(path: string): Promise<void> {
-        files.delete(path);
       }
     },
-    async create(path: string, content: string): Promise<void> {
+    async create(path: string, content: string): Promise<{ path: string }> {
       files.set(path, content);
+      return { path };
     },
     async createFolder(path: string): Promise<void> {
       folders.add(path);
