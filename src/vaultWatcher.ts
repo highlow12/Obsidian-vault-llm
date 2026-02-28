@@ -78,7 +78,7 @@ export class VaultWatcher {
     }
 
     try {
-      const content = await this.vault.read(file);
+      const content = await this.vault.cachedRead(file);
       await this.indexer.indexFile(file.path, content);
       console.log(`파일 생성 인덱싱: ${file.path}`);
     } catch (error) {
@@ -147,7 +147,7 @@ export class VaultWatcher {
       this.indexer.deleteFile(oldPath);
 
       // 새 파일 인덱싱
-      const content = await this.vault.read(file);
+      const content = await this.vault.cachedRead(file);
       if (this.indexer) {
         await this.indexer.indexFile(file.path, content);
       }

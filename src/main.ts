@@ -1,4 +1,4 @@
-import { Notice, Plugin, normalizePath, TFile } from "obsidian";
+import { Notice, Plugin, normalizePath, TFile, FileSystemAdapter } from "obsidian";
 import type { ConversationTurn } from "./conversation";
 import { saveConversationFromTurns } from "./conversationStore";
 import { OvlApiClient } from "./api";
@@ -99,9 +99,10 @@ export default class OvlPlugin extends Plugin {
       }
 
       // 데이터 디렉토리 경로
+      const adapter = this.app.vault.adapter;
+      const basePath = adapter instanceof FileSystemAdapter ? adapter.getBasePath() : "";
       const dataDir = join(
-        // @ts-ignore - Obsidian API의 내부 속성 사용
-        this.app.vault.adapter.basePath,
+        basePath,
         ".obsidian",
         "plugins",
         this.manifest.id
@@ -109,8 +110,7 @@ export default class OvlPlugin extends Plugin {
 
       const metaStorePath = join(dataDir, "meta.json");
       const vectorStorePath = join(dataDir, "vectors.json");
-      // @ts-ignore - Obsidian API의 내부 속성 사용. FileSystemAdapter에만 존재합니다.
-      const vaultBasePath: string = this.app.vault.adapter.basePath ?? dataDir;
+      const vaultBasePath: string = adapter instanceof FileSystemAdapter ? adapter.getBasePath() : dataDir;
       const traceLogPath = join(vaultBasePath, ".rag_logs", "trace.json");
 
       // 인덱서 생성

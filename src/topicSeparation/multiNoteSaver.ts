@@ -244,8 +244,7 @@ function sanitizeFilename(value: string): string {
  * 폴더가 존재하는지 확인하고 없으면 생성합니다
  */
 async function ensureFolderExists(vault: Vault, folder: string): Promise<void> {
-  const exists = await vault.adapter.exists(folder);
-  if (!exists) {
+  if (!vault.getFolderByPath(folder)) {
     await vault.createFolder(folder);
   }
 }
@@ -262,7 +261,7 @@ async function ensureUniquePath(vault: Vault, path: string): Promise<string> {
   let candidate = normalized;
   let count = 1;
 
-  while (await vault.adapter.exists(candidate)) {
+  while (vault.getAbstractFileByPath(candidate) !== null) {
     candidate = `${base}-${count}${extension}`;
     count += 1;
   }

@@ -51,8 +51,7 @@ function sanitizeFileSegment(value: string): string {
 }
 
 async function ensureFolderExists(vault: Vault, folder: string): Promise<void> {
-  const exists = await vault.adapter.exists(folder);
-  if (!exists) {
+  if (!vault.getFolderByPath(folder)) {
     await vault.createFolder(folder);
   }
 }
@@ -66,7 +65,7 @@ async function ensureUniquePath(vault: Vault, path: string): Promise<string> {
   let candidate = normalized;
   let count = 1;
 
-  while (await vault.adapter.exists(candidate)) {
+  while (vault.getAbstractFileByPath(candidate) !== null) {
     candidate = `${base}-${count}${extension}`;
     count += 1;
   }
