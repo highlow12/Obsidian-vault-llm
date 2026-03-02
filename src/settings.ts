@@ -289,15 +289,31 @@ export class OvlSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("검색 유사도 임계값")
-      .setDesc("RAG 검색 결과로 채택할 최소 유사도 (0~1, 기본: 0.35)")
+      .setDesc("RAG 검색 결과로 채택할 최소 유사도 (0~1, 기본: 0.03)")
       .addText((text) =>
         text
-          .setPlaceholder("0.35")
+          .setPlaceholder("0.03")
           .setValue(String(this.plugin.settings.searchSimilarityThreshold))
           .onChange(async (value) => {
             const num = Number.parseFloat(value);
             if (!Number.isNaN(num) && num >= 0 && num <= 1) {
               this.plugin.settings.searchSimilarityThreshold = num;
+              await this.plugin.saveSettings();
+            }
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("RRF 상위 강제 포함 개수")
+      .setDesc("임계값과 무관하게 컨텍스트에 포함할 RRF 상위 결과 수 (기본: 5)")
+      .addText((text) =>
+        text
+          .setPlaceholder("5")
+          .setValue(String(this.plugin.settings.forceIncludeTopN))
+          .onChange(async (value) => {
+            const num = Number.parseInt(value);
+            if (!Number.isNaN(num) && num >= 0) {
+              this.plugin.settings.forceIncludeTopN = num;
               await this.plugin.saveSettings();
             }
           })

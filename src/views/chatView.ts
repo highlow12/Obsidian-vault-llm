@@ -1,7 +1,8 @@
 import { ItemView, Notice, WorkspaceLeaf } from "obsidian";
 import type { ConversationTurn } from "../conversation";
 import type { AssistantTokenUsage, PluginChatApi } from "../pluginApi";
-import { appendLlmInputLog } from "../logging";
+import { appendLlmInputLog, appendVaultSearchAnswerLog } from "../logging";
+import type { HybridSearchResult } from "../indexing/searchEngine";
 import { ChatMessageRenderer } from "./chatView/messageRenderer";
 import { ChatRagComposer } from "./chatView/ragComposer";
 import { ChatPromptBuilder } from "./chatView/promptBuilder";
@@ -270,12 +271,17 @@ export class ChatView extends ItemView {
 
       let reply = "";
       let requestTurns: ConversationTurn[] | null = null;
+      let vaultSearchResults: HybridSearchResult[] = [];
 
       if (useRag && this.plugin.settings.indexingEnabled) {
         // RAG 사용: 검색 후 컨텍스트 추가
         try {
           const searchResults = await this.plugin.search(input);
-          const relevantResults = this.ragComposer.filterRelevantSearchResults(searchResults);
+          const relevantResults = this.ragComposer.selectContextResults(
+            searchResults,
+            this.plugin.settings.forceIncludeTopN
+          );
+          vaultSearchResults = relevantResults as HybridSearchResult[];
 
           if (relevantResults.length === 0) {
             if (showSourcesOnly) {
@@ -311,6 +317,16 @@ export class ChatView extends ItemView {
       }
 
       if (requestTurns) {
+        if (useRag) {
+          await appendVaultSearchAnswerLog(
+            this.app,
+            this.plugin.manifest,
+            input,
+            vaultSearchResults,
+            this.plugin.settings.systemPrompt,
+            requestTurns
+          );
+        }
         await appendLlmInputLog(this.app, this.plugin.manifest, {
           source: useRag ? "vault-search" : "send",
           systemPrompt: this.plugin.settings.systemPrompt,

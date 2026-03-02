@@ -2,7 +2,7 @@ import { Notice, Plugin, normalizePath, TFile, FileSystemAdapter } from "obsidia
 import type { ConversationTurn } from "./conversation";
 import { saveConversationFromTurns } from "./conversationStore";
 import { OvlApiClient } from "./api";
-import { appendErrorLog } from "./logging";
+import { appendErrorLog, appendHybridSearchLog } from "./logging";
 import { SaveConversationModal, SaveConversationForm } from "./modals/saveConversationModal";
 import { parseTurns } from "./parseTurns";
 import { OvlSettingTab } from "./settings";
@@ -110,8 +110,7 @@ export default class OvlPlugin extends Plugin {
 
       const metaStorePath = join(dataDir, "meta.json");
       const vectorStorePath = join(dataDir, "vectors.json");
-      const vaultBasePath: string = adapter instanceof FileSystemAdapter ? adapter.getBasePath() : dataDir;
-      const traceLogPath = join(vaultBasePath, ".rag_logs", "trace.json");
+      const traceLogPath = join(dataDir, "log.txt");
 
       // 인덱서 생성
       this.indexer = new Indexer({
@@ -130,7 +129,11 @@ export default class OvlPlugin extends Plugin {
       await this.indexer.initialize();
 
       // 하이브리드 검색 엔진 생성 (트레이스 로그 경로 포함)
-      this.searchEngine = new SearchEngine(this.indexer, traceLogPath);
+      this.searchEngine = new SearchEngine(
+        this.indexer,
+        traceLogPath,
+        (entry) => appendHybridSearchLog(this.app, this.manifest, entry)
+      );
 
       // 볼트 워처 설정
       this.vaultWatcher = new VaultWatcher(this.app.vault);
@@ -291,6 +294,11 @@ export default class OvlPlugin extends Plugin {
       this.settings.embeddingProvider = "gemini";
       this.settings.embeddingModel = EMBEDDING_PRESETS.gemini.model;
       this.settings.embeddingApiUrl = EMBEDDING_PRESETS.gemini.apiUrl || "";
+      changed = true;
+    }
+
+    if (this.settings.searchSimilarityThreshold === 0.35) {
+      this.settings.searchSimilarityThreshold = 0.03;
       changed = true;
     }
 

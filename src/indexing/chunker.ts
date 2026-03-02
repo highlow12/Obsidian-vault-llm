@@ -34,79 +34,84 @@ export function chunkText(
   const chunkOverlap = options.chunkOverlap || 50;
   const chunks: Chunk[] = [];
 
-  for (const section of sections) {
-    const sectionText = section.heading
-      ? `# ${section.heading}\n\n${section.content}`
-      : section.content;
+  // 헤더 기준 섹션 경계는 무시하고, 전체 텍스트를 토큰/길이 기준으로만 청킹
+  const fullText = sections
+    .map((section) => {
+      const sectionText = section.heading
+        ? `# ${section.heading}\n\n${section.content}`
+        : section.content;
+      return sectionText.trim();
+    })
+    .filter((text) => text.length > 0)
+    .join("\n\n");
 
-    if (!sectionText.trim()) {
-      continue;
-    }
+  if (!fullText.trim()) {
+    return chunks;
+  }
 
-    const tokenCount = estimateTokenCount(sectionText);
+  const totalTokens = estimateTokenCount(fullText);
 
-    // 섹션이 청크 크기보다 작으면 그대로 사용
-    if (tokenCount <= chunkSize) {
-      chunks.push({
-        id: `${noteId}-chunk-${chunks.length}`,
-        noteId,
-        text: sectionText,
-        position: section.position,
-        tokenCount,
-        section: section.heading,
-      });
-      continue;
-    }
+  // 문서 전체가 청크 크기보다 작으면 그대로 사용
+  if (totalTokens <= chunkSize) {
+    chunks.push({
+      id: `${noteId}-chunk-0`,
+      noteId,
+      text: fullText,
+      position: 0,
+      tokenCount: totalTokens,
+      section: "",
+    });
+    return chunks;
+  }
 
-    // 섹션이 크면 문장 단위로 분할
-    const sentences = splitIntoSentences(sectionText);
-    let currentChunk: string[] = [];
-    let currentTokens = 0;
+  // 문서 전체를 문장 단위로 분할
+  const sentences = splitIntoSentences(fullText);
+  let currentChunk: string[] = [];
+  let currentTokens = 0;
 
-    for (const sentence of sentences) {
-      const sentenceTokens = estimateTokenCount(sentence);
+  for (const sentence of sentences) {
+    const sentenceTokens = estimateTokenCount(sentence);
 
-      // 현재 청크에 추가 가능한지 확인
-      if (currentTokens + sentenceTokens <= chunkSize) {
-        currentChunk.push(sentence);
-        currentTokens += sentenceTokens;
-      } else {
-        // 현재 청크 저장
-        if (currentChunk.length > 0) {
-          const chunkText = currentChunk.join(" ");
-          chunks.push({
-            id: `${noteId}-chunk-${chunks.length}`,
-            noteId,
-            text: chunkText,
-            position: section.position,
-            tokenCount: currentTokens,
-            section: section.heading,
-          });
+    // 현재 청크에 추가 가능한지 확인
+    if (currentTokens + sentenceTokens <= chunkSize) {
+      currentChunk.push(sentence);
+      currentTokens += sentenceTokens;
+    } else {
+      // 현재 청크 저장
+      if (currentChunk.length > 0) {
+        const chunkText = currentChunk.join(" ");
+        chunks.push({
+          id: `${noteId}-chunk-${chunks.length}`,
+          noteId,
+          text: chunkText,
+          position: 0,
+          tokenCount: currentTokens,
+          section: "",
+        });
 
-          // 오버랩을 위해 마지막 몇 문장 유지
-          const overlapSentences = getOverlapSentences(currentChunk, chunkOverlap);
-          currentChunk = overlapSentences;
-          currentTokens = estimateTokenCount(currentChunk.join(" "));
-        }
-
-        // 새 청크 시작
-        currentChunk.push(sentence);
-        currentTokens += sentenceTokens;
+        // 오버랩을 위해 마지막 몇 문장 유지
+        const overlapSentences = getOverlapSentences(currentChunk, chunkOverlap);
+        currentChunk = overlapSentences;
+        currentTokens = estimateTokenCount(currentChunk.join(" "));
       }
-    }
 
-    // 마지막 청크 저장
-    if (currentChunk.length > 0) {
-      const chunkText = currentChunk.join(" ");
-      chunks.push({
-        id: `${noteId}-chunk-${chunks.length}`,
-        noteId,
-        text: chunkText,
-        position: section.position,
-        tokenCount: currentTokens,
-        section: section.heading,
-      });
+      // 새 청크 시작
+      currentChunk.push(sentence);
+      currentTokens += sentenceTokens;
     }
+  }
+
+  // 마지막 청크 저장
+  if (currentChunk.length > 0) {
+    const chunkText = currentChunk.join(" ");
+    chunks.push({
+      id: `${noteId}-chunk-${chunks.length}`,
+      noteId,
+      text: chunkText,
+      position: 0,
+      tokenCount: currentTokens,
+      section: "",
+    });
   }
 
   return chunks;

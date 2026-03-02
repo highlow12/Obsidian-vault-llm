@@ -2,6 +2,7 @@ import type { ConversationTurn } from "../../conversation";
 import type { Chunk, NoteMetadata } from "../../indexing/types";
 
 export type ChatSearchResult = { chunk: Chunk; note: NoteMetadata; score: number };
+const DEFAULT_FORCE_INCLUDE_TOP_N = 5;
 
 export class ChatRagComposer {
   constructor(private readonly getThreshold: () => number) {}
@@ -15,6 +16,22 @@ export class ChatRagComposer {
       }
       return score >= threshold;
     });
+  }
+
+  selectContextResults(
+    searchResults: ChatSearchResult[],
+    forceIncludeTopN: number = DEFAULT_FORCE_INCLUDE_TOP_N
+  ): ChatSearchResult[] {
+    const thresholdResults = this.filterRelevantSearchResults(searchResults);
+    const guaranteedTop = searchResults.slice(0, Math.max(0, forceIncludeTopN));
+    const merged = [...guaranteedTop, ...thresholdResults];
+    const uniqueByChunkId = new Map<string, ChatSearchResult>();
+
+    for (const result of merged) {
+      uniqueByChunkId.set(result.chunk.id, result);
+    }
+
+    return Array.from(uniqueByChunkId.values());
   }
 
   buildContext(searchResults: ChatSearchResult[]): string {
