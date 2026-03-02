@@ -51,35 +51,36 @@ export async function appendEmbeddingLog(
   manifest: PluginManifest | undefined,
   data: EmbeddingLogData
 ): Promise<void> {
-  const logPath = getPluginLogPath(app, manifest);
-  const timestamp = new Date().toISOString();
-  
-  // 입력 텍스트 전체 (개행 제거)
-  const inputText = data.inputText.replace(/\n/g, ' ');
-  
-  // 임베딩 벡터를 간단히 표현
-  const embeddingInfo = `[벡터 차원: ${data.embedding.length}]`;
-  
-  // 유사도 정보
-  let similarityInfo = '';
-  if (data.similarity !== undefined) {
-    similarityInfo = ` | 이전 임베딩과의 유사도: ${(data.similarity * 100).toFixed(2)}%`;
-  }
-  
-  // 로그 엔트리
-  let entry = `\n[${timestamp}] [임베딩] 입력: "${inputText}" ${embeddingInfo}${similarityInfo}\n`;
-
-  try {
-    const exists = await app.vault.adapter.exists(logPath);
-    if (exists) {
-      const current = await app.vault.adapter.read(logPath);
-      await app.vault.adapter.write(logPath, `${entry}${current}`);
-    } else {
-      await app.vault.adapter.write(logPath, entry.trimStart());
-    }
-  } catch (error) {
-    console.error('[임베딩 로그] 파일 쓰기 실패:', error);
-  }
+  // 에러가 아닌 일반 로그는 비활성화
+  // const logPath = getPluginLogPath(app, manifest);
+  // const timestamp = new Date().toISOString();
+  //
+  // // 입력 텍스트 전체 (개행 제거)
+  // const inputText = data.inputText.replace(/\n/g, ' ');
+  //
+  // // 임베딩 벡터를 간단히 표현
+  // const embeddingInfo = `[벡터 차원: ${data.embedding.length}]`;
+  //
+  // // 유사도 정보
+  // let similarityInfo = '';
+  // if (data.similarity !== undefined) {
+  //   similarityInfo = ` | 이전 임베딩과의 유사도: ${(data.similarity * 100).toFixed(2)}%`;
+  // }
+  //
+  // // 로그 엔트리
+  // let entry = `\n[${timestamp}] [임베딩] 입력: "${inputText}" ${embeddingInfo}${similarityInfo}\n`;
+  //
+  // try {
+  //   const exists = await app.vault.adapter.exists(logPath);
+  //   if (exists) {
+  //     const current = await app.vault.adapter.read(logPath);
+  //     await app.vault.adapter.write(logPath, `${entry}${current}`);
+  //   } else {
+  //     await app.vault.adapter.write(logPath, entry.trimStart());
+  //   }
+  // } catch (error) {
+  //   console.error('[임베딩 로그] 파일 쓰기 실패:', error);
+  // }
 }
 
 export async function appendTopicSeparationFailureLog(
@@ -125,38 +126,39 @@ export async function appendLlmInputLog(
   manifest: PluginManifest | undefined,
   data: LlmInputLogData
 ): Promise<void> {
-  const logPath = getPluginLogPath(app, manifest);
-  const timestamp = new Date().toISOString();
-  const sourceLabel =
-    data.source === "vault-search" ? "볼트 검색 답변" :
-    data.source === "save-summary" ? "저장 요약" :
-    data.source === "save-topic" ? "저장 주제 분리" :
-    "전송";
-
-  let entry = `\n[${timestamp}] [LLM 입력] 경로: ${sourceLabel}\n`;
-
-  const systemPrompt = data.systemPrompt?.trim();
-  if (systemPrompt) {
-    entry += `[system:설정]\n${systemPrompt}\n`;
-  }
-
-  for (const turn of data.turns) {
-    entry += `[${turn.role}]\n${turn.content}\n`;
-  }
-
-  entry += "---\n";
-
-  try {
-    const exists = await app.vault.adapter.exists(logPath);
-    if (exists) {
-      const current = await app.vault.adapter.read(logPath);
-      await app.vault.adapter.write(logPath, `${entry}${current}`);
-    } else {
-      await app.vault.adapter.write(logPath, entry.trimStart());
-    }
-  } catch (error) {
-    console.error("[LLM 입력 로그] 파일 쓰기 실패:", error);
-  }
+  // 에러가 아닌 일반 로그는 비활성화
+  // const logPath = getPluginLogPath(app, manifest);
+  // const timestamp = new Date().toISOString();
+  // const sourceLabel =
+  //   data.source === "vault-search" ? "볼트 검색 답변" :
+  //   data.source === "save-summary" ? "저장 요약" :
+  //   data.source === "save-topic" ? "저장 주제 분리" :
+  //   "전송";
+  //
+  // let entry = `\n[${timestamp}] [LLM 입력] 경로: ${sourceLabel}\n`;
+  //
+  // const systemPrompt = data.systemPrompt?.trim();
+  // if (systemPrompt) {
+  //   entry += `[system:설정]\n${systemPrompt}\n`;
+  // }
+  //
+  // for (const turn of data.turns) {
+  //   entry += `[${turn.role}]\n${turn.content}\n`;
+  // }
+  //
+  // entry += "---\n";
+  //
+  // try {
+  //   const exists = await app.vault.adapter.exists(logPath);
+  //   if (exists) {
+  //     const current = await app.vault.adapter.read(logPath);
+  //     await app.vault.adapter.write(logPath, `${entry}${current}`);
+  //   } else {
+  //     await app.vault.adapter.write(logPath, entry.trimStart());
+  //   }
+  // } catch (error) {
+  //   console.error("[LLM 입력 로그] 파일 쓰기 실패:", error);
+  // }
 }
 
 function toSafeString(detail: unknown): string {
