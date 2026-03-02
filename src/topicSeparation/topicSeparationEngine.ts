@@ -11,6 +11,12 @@ import { EmbeddingGenerator, cosineSimilarity } from './embeddingService';
 import { appendTopicSeparationFailureLog } from '../logging';
 import type { ConversationSegment, TopicBoundary, SegmentLink, TopicSeparationResult } from './types';
 
+interface EmbeddingUnit {
+  text: string;
+  startTurnIndex: number;
+  endTurnIndex: number;
+}
+
 export interface TopicSeparationConfig {
   apiKey: string;
   embeddingModel?: string; // 임베딩 모델 이름
@@ -60,8 +66,9 @@ export class TopicSeparationEngine {
         };
       }
 
-      // 1. 각 턴의 텍스트 준비 (키워드 메타데이터 추가)
-      const turnTexts = this.prepareTurnTexts(turns);
+      // 1. 임베딩 단위 텍스트 준비 (턴 인덱스 매핑 포함)
+      const embeddingUnits = this.prepareEmbeddingUnits(turns);
+      const turnTexts = embeddingUnits.map(unit => unit.text);
 
       // 2. 임베딩 생성
       console.log('임베딩 생성 중...');
@@ -106,7 +113,7 @@ export class TopicSeparationEngine {
       console.log('세그먼트 생성 중...');
       let segments: ConversationSegment[];
       try {
-        segments = this.createSegments(turns, boundaries, similarities);
+        segments = this.createSegmentsFromUnits(turns, embeddingUnits, boundaries, similarities);
       } catch (error) {
         const msg = `세그먼트 생성 실패: ${error instanceof Error ? error.message : String(error)}`;
         if (this.config.app) {
@@ -174,8 +181,8 @@ export class TopicSeparationEngine {
    * 턴 텍스트를 준비합니다 (사용자 지정 형식)
    * 임베딩 입력 = [현재 질문과 그 답변의 키워드] + 이전 assistant 마지막 2~3문장 + 현재 질문 + 현재 assistant 마지막 2~3문장
    */
-  private prepareTurnTexts(turns: ConversationTurn[]): string[] {
-    const result: string[] = [];
+  private prepareEmbeddingUnits(turns: ConversationTurn[]): EmbeddingUnit[] {
+    const result: EmbeddingUnit[] = [];
     
     for (let i = 0; i < turns.length; i++) {
       const turn = turns[i];
@@ -225,7 +232,11 @@ export class TopicSeparationEngine {
           .filter(s => s.length > 0)
           .join(' ');
         
-        result.push(embeddingInput);
+        result.push({
+          text: embeddingInput,
+          startTurnIndex: i,
+          endTurnIndex: i + 1 < turns.length && turns[i + 1].role === 'assistant' ? i + 2 : i + 1
+        });
         
         // assistant 턴은 건너뛰기 (user 턴에서 이미 처리됨)
         if (i + 1 < turns.length && turns[i + 1].role === 'assistant') {
@@ -238,11 +249,21 @@ export class TopicSeparationEngine {
         const keywordStr = keywords.length > 0 ? `[키워드: ${keywords.join(', ')}]` : '';
         
         embeddingInput = [keywordStr, lastSentences].filter(s => s.length > 0).join(' ');
-        result.push(embeddingInput);
+        result.push({
+          text: embeddingInput,
+          startTurnIndex: i,
+          endTurnIndex: i + 1
+        });
       }
     }
     
-    return result.length > 0 ? result : turns.map(t => t.content);
+    return result.length > 0
+      ? result
+      : turns.map((turn, index) => ({
+          text: turn.content,
+          startTurnIndex: index,
+          endTurnIndex: index + 1
+        }));
   }
 
   /**
@@ -343,43 +364,71 @@ export class TopicSeparationEngine {
   /**
    * 세그먼트를 생성합니다
    */
-  private createSegments(
+  private createSegmentsFromUnits(
     turns: ConversationTurn[],
+    embeddingUnits: EmbeddingUnit[],
     boundaries: TopicBoundary[],
     similarities: number[]
   ): ConversationSegment[] {
+    if (embeddingUnits.length === 0) {
+      return [];
+    }
+
     const segments: ConversationSegment[] = [];
-    const boundaryIndices = boundaries.map(b => b.index).sort((a, b) => a - b);
+    const boundaryIndices = Array.from(
+      new Set(
+        boundaries
+          .map(b => b.index)
+          .filter(index => index > 0 && index < embeddingUnits.length)
+      )
+    ).sort((a, b) => a - b);
     const minSegmentLength = this.config.minSegmentLength!;
 
-    let startIndex = 0;
-    for (const endIndex of boundaryIndices) {
-      if (endIndex - startIndex >= minSegmentLength) {
-        const segmentTurns = turns.slice(startIndex, endIndex);
+    let startUnitIndex = 0;
+    for (const boundaryUnitIndex of boundaryIndices) {
+      if (boundaryUnitIndex <= startUnitIndex) {
+        continue;
+      }
+
+      const startTurnIndex = embeddingUnits[startUnitIndex].startTurnIndex;
+      const endTurnIndex = embeddingUnits[boundaryUnitIndex - 1].endTurnIndex;
+
+      if (endTurnIndex - startTurnIndex >= minSegmentLength) {
+        const segmentTurns = turns.slice(startTurnIndex, endTurnIndex);
         const keywords = this.extractSegmentKeywords(segmentTurns);
-        const avgSimilarity = this.calculateAverageSimilarity(similarities, startIndex, endIndex);
+        const avgSimilarity = this.calculateAverageSimilarityByUnits(
+          similarities,
+          startUnitIndex,
+          boundaryUnitIndex
+        );
 
         segments.push({
-          startIndex,
-          endIndex,
+          startIndex: startTurnIndex,
+          endIndex: endTurnIndex,
           turns: segmentTurns,
           keywords,
           avgSimilarity
         });
-      }
 
-      startIndex = endIndex;
+        startUnitIndex = boundaryUnitIndex;
+      }
     }
 
     // 마지막 세그먼트
-    if (startIndex < turns.length) {
-      const segmentTurns = turns.slice(startIndex);
+    const finalStartTurnIndex = embeddingUnits[startUnitIndex].startTurnIndex;
+    const finalEndTurnIndex = embeddingUnits[embeddingUnits.length - 1].endTurnIndex;
+    if (finalStartTurnIndex < finalEndTurnIndex) {
+      const segmentTurns = turns.slice(finalStartTurnIndex, finalEndTurnIndex);
       const keywords = this.extractSegmentKeywords(segmentTurns);
-      const avgSimilarity = this.calculateAverageSimilarity(similarities, startIndex, turns.length);
+      const avgSimilarity = this.calculateAverageSimilarityByUnits(
+        similarities,
+        startUnitIndex,
+        embeddingUnits.length
+      );
 
       segments.push({
-        startIndex,
-        endIndex: turns.length,
+        startIndex: finalStartTurnIndex,
+        endIndex: finalEndTurnIndex,
         turns: segmentTurns,
         keywords,
         avgSimilarity
@@ -400,12 +449,19 @@ export class TopicSeparationEngine {
   /**
    * 구간의 평균 유사도를 계산합니다
    */
-  private calculateAverageSimilarity(similarities: number[], start: number, end: number): number {
-    if (start >= end - 1) {
+  private calculateAverageSimilarityByUnits(
+    similarities: number[],
+    startUnitIndex: number,
+    endUnitIndex: number
+  ): number {
+    if (startUnitIndex >= endUnitIndex - 1) {
       return 1.0;
     }
 
-    const relevantSimilarities = similarities.slice(start, Math.min(end - 1, similarities.length));
+    const relevantSimilarities = similarities.slice(
+      startUnitIndex,
+      Math.min(endUnitIndex - 1, similarities.length)
+    );
     if (relevantSimilarities.length === 0) {
       return 1.0;
     }

@@ -3,7 +3,7 @@ import type { PluginChatApi } from "../../pluginApi";
 import type { ChatPromptBuilder } from "./promptBuilder";
 import type { ChatTextSanitizer } from "./textSanitizer";
 import { appendLlmInputLog } from "../../logging";
-import { TopicSeparationEngine, saveSegmentsAsNotes } from "../../topicSeparation";
+import { TopicSeparationEngine } from "../../topicSeparation";
 
 export class ChatTopicSeparationService {
   constructor(
@@ -11,6 +11,31 @@ export class ChatTopicSeparationService {
     private readonly promptBuilder: ChatPromptBuilder,
     private readonly textSanitizer: ChatTextSanitizer
   ) {}
+
+  private async summarizeTurnsForSave(turns: ConversationTurn[]): Promise<string> {
+    const summaryPrompt = this.promptBuilder.buildWikiSummaryPrompt(turns);
+    await appendLlmInputLog(this.plugin.app, this.plugin.manifest, {
+      source: "save-summary",
+      systemPrompt: "",
+      turns: [{ role: "user", content: summaryPrompt, timestamp: new Date().toISOString() }]
+    });
+
+    let summary = await this.plugin.requestSummaryReply(summaryPrompt);
+    summary = this.textSanitizer.cleanSummary(summary);
+
+    if (this.textSanitizer.isSummaryTooShort(summary)) {
+      const retryPrompt = this.promptBuilder.buildWikiSummaryPrompt(turns, true);
+      await appendLlmInputLog(this.plugin.app, this.plugin.manifest, {
+        source: "save-summary",
+        systemPrompt: "",
+        turns: [{ role: "user", content: retryPrompt, timestamp: new Date().toISOString() }]
+      });
+      summary = await this.plugin.requestSummaryReply(retryPrompt);
+      summary = this.textSanitizer.cleanSummary(summary);
+    }
+
+    return summary;
+  }
 
   async separateTopicsWithLLM(
     turns: ConversationTurn[]
@@ -27,13 +52,19 @@ export class ChatTopicSeparationService {
 
     const prompt =
       `다음 대화를 주제별로 분리하고 각 주제에 대한 위키 문서를 작성해 주세요.\n\n` +
-      `요구사항:\n` +
-      `- 대화의 주요 주제들을 파악하여 분리\n` +
-      `- 주제가 하나뿐이면 하나의 문서만 작성\n` +
-      `- 각 주제별로 맥락, 근거, 결론, 후속 과제를 포함한 위키 형식 문서 작성\n` +
+      `중요: 과도한 분리를 피하고, 의미상 큰 전환이 있을 때만 분리하세요.\n\n` +
+      `분리 원칙:\n` +
+      `- 기본값은 1개 문서입니다. 명확한 근거가 없으면 분리하지 마세요.\n` +
+      `- 질문/답변 한 번 바뀌었다는 이유만으로 새 주제를 만들지 마세요.\n` +
+      `- 같은 목표의 후속 질문, 세부화, 예시 요청, 재질문은 같은 주제로 유지하세요.\n` +
+      `- 아래 경우에만 새 주제로 분리하세요: 문제 영역이 바뀜, 사용자 의도가 바뀜, 산출물 유형이 바뀜(예: 일정 논의 → 메뉴 추천).\n` +
+      `- 애매하면 반드시 합치세요(보수적으로 분리).\n` +
+      `- 전체 문서 수는 가능한 최소로 유지하세요.\n\n` +
+      `출력 요구사항:\n` +
       `- 반드시 JSON 배열 형식으로만 응답 (다른 텍스트 없이)\n` +
       `- 형식: [{"title": "주제 제목", "content": "마크다운 내용"}, ...]\n` +
-      `- title: 20자 이내의 간결한 제목, content: 위키 형식 마크다운, 한국어\n\n` +
+      `- title: 20자 이내의 간결한 제목, content: 위키 형식 마크다운, 한국어\n` +
+      `- 각 주제 문서에는 맥락, 근거, 결론, 후속 과제를 포함하세요.\n\n` +
       `대화:\n${transcript}\n\n` +
       `JSON만 출력 (코드블록 없이):`;
 
@@ -106,25 +137,7 @@ export class ChatTopicSeparationService {
       return 1;
     }
 
-    const summaryPrompt = this.promptBuilder.buildWikiSummaryPrompt(turns);
-    await appendLlmInputLog(this.plugin.app, this.plugin.manifest, {
-      source: "save-summary",
-      systemPrompt: "",
-      turns: [{ role: "user", content: summaryPrompt, timestamp: new Date().toISOString() }]
-    });
-    let summary = await this.plugin.requestSummaryReply(summaryPrompt);
-    summary = this.textSanitizer.cleanSummary(summary);
-
-    if (this.textSanitizer.isSummaryTooShort(summary)) {
-      const retryPrompt = this.promptBuilder.buildWikiSummaryPrompt(turns, true);
-      await appendLlmInputLog(this.plugin.app, this.plugin.manifest, {
-        source: "save-summary",
-        systemPrompt: "",
-        turns: [{ role: "user", content: retryPrompt, timestamp: new Date().toISOString() }]
-      });
-      summary = await this.plugin.requestSummaryReply(retryPrompt);
-      summary = this.textSanitizer.cleanSummary(summary);
-    }
+    const summary = await this.summarizeTurnsForSave(turns);
 
     await this.plugin.saveConversationFromTurns(
       llmBaseTitle,
@@ -137,14 +150,16 @@ export class ChatTopicSeparationService {
   /**
    * 임베딩/키워드 기반 주제 분리 후 저장합니다 (fed909fc 버전 로직)
    *
-   * 다중 주제가 발견된 경우에만 저장하고 세그먼트 수를 반환합니다.
-   * 단일 주제인 경우 0을 반환하며, 호출자가 위키 요약으로 폴백해야 합니다.
+    * 임베딩으로 분리된 각 세그먼트를 LLM 위키 요약으로 저장합니다.
+    * 단일 주제(또는 경계 미검출)인 경우에도 요약 문서를 반드시 저장합니다.
    */
   async runEmbeddingTopicSeparation(
     turns: ConversationTurn[],
     finalSessionId: string,
     outputFolder: string
   ): Promise<number> {
+    const embeddingBaseTitle = `${finalSessionId}(임베딩)`;
+
     const engine = new TopicSeparationEngine({
       apiKey: this.plugin.settings.embeddingApiKey || this.plugin.settings.apiKey,
       embeddingModel: this.plugin.settings.embeddingModel,
@@ -161,20 +176,29 @@ export class ChatTopicSeparationService {
       const result = await engine.separateTopics(turns);
       console.log(`주제 분리 완료: ${result.segments.length}개 세그먼트 감지`);
 
-      if (result.segments.length > 1) {
-        await saveSegmentsAsNotes(
-          this.plugin.app.vault,
-          result.segments,
-          result.links,
-          finalSessionId,
-          outputFolder,
-          this.plugin.app,
-          this.plugin.manifest
+      const segments = result.segments.length > 0 ? result.segments.map((segment) => segment.turns) : [turns];
+
+      if (segments.length === 1) {
+        const summary = await this.summarizeTurnsForSave(segments[0]);
+        await this.plugin.saveConversationFromTurns(
+          embeddingBaseTitle,
+          [{ role: "assistant", content: summary, timestamp: new Date().toISOString() }],
+          outputFolder
         );
-        return result.segments.length;
+        return 1;
       }
 
-      return 0;
+      for (let segmentIndex = 0; segmentIndex < segments.length; segmentIndex++) {
+        const summary = await this.summarizeTurnsForSave(segments[segmentIndex]);
+        const docTitle = `${embeddingBaseTitle} - ${segmentIndex + 1}`;
+        await this.plugin.saveConversationFromTurns(
+          docTitle,
+          [{ role: "assistant", content: summary, timestamp: new Date().toISOString() }],
+          outputFolder
+        );
+      }
+
+      return segments.length;
     } finally {
       engine.clearCache();
     }
