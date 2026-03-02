@@ -3,7 +3,6 @@ import type { PluginChatApi } from "../../pluginApi";
 import type { ChatPromptBuilder } from "./promptBuilder";
 import type { ChatTextSanitizer } from "./textSanitizer";
 import { appendLlmInputLog } from "../../logging";
-import { TopicSeparationEngine } from "../../topicSeparation";
 
 export class ChatTopicSeparationService {
   constructor(
@@ -150,57 +149,56 @@ export class ChatTopicSeparationService {
   /**
    * 임베딩/키워드 기반 주제 분리 후 저장합니다 (fed909fc 버전 로직)
    *
-    * 임베딩으로 분리된 각 세그먼트를 LLM 위키 요약으로 저장합니다.
-    * 단일 주제(또는 경계 미검출)인 경우에도 요약 문서를 반드시 저장합니다.
+    * 사용자 요청으로 임베딩 방식 주제 분리 기능을 비활성화했습니다.
+    * 필요 시 아래 주석 처리된 기존 구현을 복구해 사용할 수 있습니다.
    */
   async runEmbeddingTopicSeparation(
     turns: ConversationTurn[],
     finalSessionId: string,
     outputFolder: string
   ): Promise<number> {
-    const embeddingBaseTitle = `${finalSessionId}(임베딩)`;
+    void turns;
+    void finalSessionId;
+    void outputFolder;
 
-    const engine = new TopicSeparationEngine({
-      apiKey: this.plugin.settings.embeddingApiKey || this.plugin.settings.apiKey,
-      embeddingModel: this.plugin.settings.embeddingModel,
-      similarityThreshold: this.plugin.settings.saveSimilarityThreshold,
-      minSegmentLength: 2,
-      windowSize: 2,
-      enableKeywordMetadata: true,
-      app: this.plugin.app,
-      manifest: this.plugin.manifest,
-      enableEmbeddingLogging: true
-    });
+    // const embeddingBaseTitle = `${finalSessionId}(임베딩)`;
+    // const engine = new TopicSeparationEngine({
+    //   apiKey: this.plugin.settings.embeddingApiKey || this.plugin.settings.apiKey,
+    //   embeddingModel: this.plugin.settings.embeddingModel,
+    //   similarityThreshold: this.plugin.settings.saveSimilarityThreshold,
+    //   minSegmentLength: 2,
+    //   windowSize: 2,
+    //   enableKeywordMetadata: true,
+    //   app: this.plugin.app,
+    //   manifest: this.plugin.manifest,
+    //   enableEmbeddingLogging: true
+    // });
+    // try {
+    //   const result = await engine.separateTopics(turns);
+    //   const segments = result.segments.length > 0 ? result.segments.map((segment) => segment.turns) : [turns];
+    //   if (segments.length === 1) {
+    //     const summary = await this.summarizeTurnsForSave(segments[0]);
+    //     await this.plugin.saveConversationFromTurns(
+    //       embeddingBaseTitle,
+    //       [{ role: "assistant", content: summary, timestamp: new Date().toISOString() }],
+    //       outputFolder
+    //     );
+    //     return 1;
+    //   }
+    //   for (let segmentIndex = 0; segmentIndex < segments.length; segmentIndex++) {
+    //     const summary = await this.summarizeTurnsForSave(segments[segmentIndex]);
+    //     const docTitle = `${embeddingBaseTitle} - ${segmentIndex + 1}`;
+    //     await this.plugin.saveConversationFromTurns(
+    //       docTitle,
+    //       [{ role: "assistant", content: summary, timestamp: new Date().toISOString() }],
+    //       outputFolder
+    //     );
+    //   }
+    //   return segments.length;
+    // } finally {
+    //   engine.clearCache();
+    // }
 
-    try {
-      const result = await engine.separateTopics(turns);
-      console.log(`주제 분리 완료: ${result.segments.length}개 세그먼트 감지`);
-
-      const segments = result.segments.length > 0 ? result.segments.map((segment) => segment.turns) : [turns];
-
-      if (segments.length === 1) {
-        const summary = await this.summarizeTurnsForSave(segments[0]);
-        await this.plugin.saveConversationFromTurns(
-          embeddingBaseTitle,
-          [{ role: "assistant", content: summary, timestamp: new Date().toISOString() }],
-          outputFolder
-        );
-        return 1;
-      }
-
-      for (let segmentIndex = 0; segmentIndex < segments.length; segmentIndex++) {
-        const summary = await this.summarizeTurnsForSave(segments[segmentIndex]);
-        const docTitle = `${embeddingBaseTitle} - ${segmentIndex + 1}`;
-        await this.plugin.saveConversationFromTurns(
-          docTitle,
-          [{ role: "assistant", content: summary, timestamp: new Date().toISOString() }],
-          outputFolder
-        );
-      }
-
-      return segments.length;
-    } finally {
-      engine.clearCache();
-    }
+    return 0;
   }
 }

@@ -408,47 +408,30 @@ export class ChatView extends ItemView {
       const outputFolder = this.plugin.settings.defaultOutputFolder;
       const currentMessages = this.messageRenderer.getMessages();
 
-      // 2턴 이상이고 API 키가 있을 때 LLM + 임베딩 동시 주제 분리 시도
+      // 2턴 이상이고 API 키가 있을 때 LLM 주제 분리 시도
       const enableTopicSeparation = currentMessages.length >= MIN_TURNS_FOR_TOPIC_SEPARATION &&
         (this.plugin.settings.embeddingApiKey || this.plugin.settings.apiKey);
 
       if (enableTopicSeparation) {
         new Notice("대화를 주제별로 분석하는 중...");
 
-        // LLM 방식과 임베딩 방식을 동시에 실행
-        const [llmResult, embeddingResult] = await Promise.allSettled([
-          this.topicSeparationService.runLlmTopicSeparation(
-            currentMessages,
-            finalSessionId,
-            outputFolder
-          ),
-          this.topicSeparationService.runEmbeddingTopicSeparation(
-            currentMessages,
-            finalSessionId,
-            outputFolder
-          )
-        ]);
+        // 사용자 요청으로 임베딩 방식 주제 분리/요약 기능은 주석 처리
+        // const embeddingResult = await this.topicSeparationService.runEmbeddingTopicSeparation(
+        //   currentMessages,
+        //   finalSessionId,
+        //   outputFolder
+        // );
 
-        let anySuccess = false;
-
-        if (llmResult.status === "fulfilled") {
-          new Notice(`LLM 방식 저장 완료! (${llmResult.value}개 파일)`);
-          anySuccess = true;
-        } else {
-          const msg = llmResult.reason instanceof Error ? llmResult.reason.message : String(llmResult.reason);
-          new Notice(`LLM 방식 저장 실패: ${msg}`);
-        }
-
-        if (embeddingResult.status === "fulfilled") {
-          new Notice(`임베딩 방식 저장 완료! (${embeddingResult.value}개 파일)`);
-          anySuccess = true;
-        } else {
-          const msg = embeddingResult.reason instanceof Error ? embeddingResult.reason.message : String(embeddingResult.reason);
-          new Notice(`임베딩 방식 저장 실패: ${msg}`);
-        }
-
-        if (anySuccess) {
+        const llmResult = await this.topicSeparationService.runLlmTopicSeparation(
+          currentMessages,
+          finalSessionId,
+          outputFolder
+        );
+        if (llmResult > 0) {
+          new Notice(`LLM 방식 저장 완료! (${llmResult}개 파일)`);
           this.resetSession();
+        } else {
+          new Notice("LLM 방식 저장 결과가 없습니다.");
         }
         return;
       }
