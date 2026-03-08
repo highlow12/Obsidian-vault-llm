@@ -10,5 +10,3 @@ export * from "./vectorIndexFactory";
 export * from "./metadataStore";
 export * from "./vectorStore";
 export * from "./indexer";
-export * from "./bm25";
-export * from "./fuzzySearch";

@@ -12,8 +12,6 @@ export interface RagTraceEntry {
   keywordQuery?: string;
   vectorResults: Array<{ chunkId: string; noteId: string; rank: number; score: number; text: string }>;
   keywordResults: Array<{ chunkId: string; noteId: string; rank: number; score: number; text: string }>;
-  bm25Results?: Array<{ chunkId: string; noteId: string; rank: number; score: number; text: string }>;
-  fuzzyResults?: Array<{ chunkId: string; noteId: string; rank: number; score: number; text: string }>;
   rrfResults: Array<{ chunkId: string; noteId: string; rank: number; rrfScore: number; text: string }>;
   finalResults: Array<{
     chunkId: string;
@@ -22,15 +20,11 @@ export interface RagTraceEntry {
     rrfScore: number;
     vectorScore?: number;
     keywordScore?: number;
-    bm25Score?: number;
-    fuzzyScore?: number;
     text: string;
   }>;
   stats: {
     vectorResultCount: number;
     keywordResultCount: number;
-    bm25ResultCount?: number;
-    fuzzyResultCount?: number;
     finalResultCount: number;
     overlapCount: number;
   };
