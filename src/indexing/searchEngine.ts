@@ -119,9 +119,13 @@ export class SearchEngine {
     const startTime = performance.now();
     const topK = k ?? 8;
 
-    // 키워드 추출 (트레이스 로그용)
+    // 의미 있는 명사 키워드 추출 (퍼지 검색 및 트레이스 로그용)
     const keywords = extractKeywords(query);
     const keywordQuery = keywords.join(" OR ");
+
+    // 퍼지 검색 쿼리: 불용어 제거 후 남은 의미 있는 키워드만 사용
+    // 키워드가 추출되지 않으면 원본 쿼리를 폴백으로 사용합니다.
+    const fuzzyQuery = keywords.length > 0 ? keywords.join(" ") : query;
 
     // 벡터 검색을 위한 임베딩 텍스트 생성
     const queryEmbeddingText = buildQueryEmbeddingText(query);
@@ -132,10 +136,10 @@ export class SearchEngine {
     const hasBm25Subset = typeof extendedIndexer.bm25ScoreSubset === "function";
 
     // Phase 1: 퍼지 검색으로 넓은 후보군 생성
-    // topK의 FUZZY_CANDIDATE_MULTIPLIER배만큼 후보를 수집합니다.
+    // 의미 있는 키워드로 검색하여 오타·유사어를 허용하며 관련 후보를 수집합니다.
     const candidateK = topK * FUZZY_CANDIDATE_MULTIPLIER;
     const fuzzyResults = hasFuzzy
-      ? extendedIndexer.fuzzySearch!(query, candidateK)
+      ? extendedIndexer.fuzzySearch!(fuzzyQuery, candidateK)
       : [];
 
     // Phase 2: BM25로 후보군 관련성 재랭킹
@@ -239,6 +243,7 @@ export class SearchEngine {
       requestedK: topK,
       extractedKeywords: keywords,
       keywordQuery,
+      fuzzyQuery,
       vectorResults: vectorResults.map((r, i) => ({
         chunkId: r.chunk.id,
         noteId: r.chunk.noteId,

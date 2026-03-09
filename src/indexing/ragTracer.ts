@@ -10,6 +10,7 @@ export interface RagTraceEntry {
   requestedK: number;
   extractedKeywords?: string[];
   keywordQuery?: string;
+  fuzzyQuery?: string;
   vectorResults: Array<{ chunkId: string; noteId: string; rank: number; score: number; text: string }>;
   keywordResults: Array<{ chunkId: string; noteId: string; rank: number; score: number; text: string }>;
   bm25Results?: Array<{ chunkId: string; noteId: string; rank: number; score: number; text: string }>;
