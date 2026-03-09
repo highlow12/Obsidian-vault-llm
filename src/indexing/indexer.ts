@@ -9,6 +9,8 @@ import { createHash } from "crypto";
 import { VectorIndex } from "./vectorIndex";
 import { createVectorIndex } from "./vectorIndexFactory";
 import { buildQueryEmbeddingText } from "./queryKeywordEmbedding";
+import { BM25Index } from "./bm25";
+import { fuzzySearch as fuzzySearchFn } from "./fuzzySearch";
 
 export class Indexer {
   private metadataStore: MetadataStore;
@@ -16,12 +18,14 @@ export class Indexer {
   private embeddingGenerator: EmbeddingGenerator;
   private config: IndexingConfig;
   private indexSignature: string;
+  private bm25Index: BM25Index;
 
   constructor(config: IndexingConfig) {
     this.config = config;
     this.indexSignature = this.generateIndexSignature();
     this.metadataStore = new MetadataStore(config.metaStorePath, this.indexSignature);
     this.vectorStore = createVectorIndex(config, this.indexSignature);
+    this.bm25Index = new BM25Index();
     
     const embeddingConfig: EmbeddingConfig = {
       provider: config.embeddingProvider,
@@ -50,6 +54,11 @@ export class Indexer {
       this.metadataStore.reset(this.indexSignature);
       this.vectorStore.reset(this.indexSignature);
     }
+
+    // 기존 청크로 BM25 인덱스 초기화
+    const existingChunks = this.metadataStore.getAllChunks();
+    this.bm25Index.buildFromChunks(existingChunks);
+    console.log(`BM25 인덱스 초기화 완료: ${existingChunks.length}개 청크`);
   }
 
   /**
@@ -90,7 +99,9 @@ export class Indexer {
       // 기존 청크 삭제
       if (existingNote) {
         const oldChunks = this.metadataStore.getChunksByNoteId(noteId);
-        this.vectorStore.deleteEmbeddings(oldChunks.map((c) => c.id));
+        const oldChunkIds = oldChunks.map((c) => c.id);
+        this.vectorStore.deleteEmbeddings(oldChunkIds);
+        this.bm25Index.removeChunks(oldChunkIds);
         this.metadataStore.deleteChunksByNoteId(noteId);
       }
 
@@ -107,6 +118,11 @@ export class Indexer {
 
       // 청크 저장
       this.metadataStore.insertChunks(chunks);
+
+      // BM25 인덱스 업데이트
+      for (const chunk of chunks) {
+        this.bm25Index.addChunk(chunk);
+      }
 
       // 임베딩 생성 및 저장
       console.log(`임베딩 생성 중: ${filePath} (${chunks.length}개 청크)`);
@@ -132,7 +148,9 @@ export class Indexer {
     }
 
     const chunks = this.metadataStore.getChunksByNoteId(note.id);
-    this.vectorStore.deleteEmbeddings(chunks.map((c) => c.id));
+    const chunkIds = chunks.map((c) => c.id);
+    this.vectorStore.deleteEmbeddings(chunkIds);
+    this.bm25Index.removeChunks(chunkIds);
     this.metadataStore.deleteChunksByNoteId(note.id);
     this.metadataStore.deleteNote(note.id);
 
@@ -211,6 +229,44 @@ export class Indexer {
     }
 
     return results.sort((a, b) => b.score - a.score).slice(0, topK);
+  }
+
+  /**
+   * BM25 알고리즘 기반 검색
+   * 단어 빈도(TF)와 역문서빈도(IDF)를 결합하여 관련성 높은 청크를 반환합니다.
+   * 단순 키워드 매칭보다 정확한 랭킹을 제공합니다.
+   */
+  bm25Search(query: string, k?: number): Array<{ chunk: Chunk; score: number }> {
+    const topK = k || this.config.topK;
+    const bm25Results = this.bm25Index.search(query, topK);
+
+    return bm25Results
+      .map(({ chunkId, score }) => {
+        const chunk = this.metadataStore.getChunkById(chunkId);
+        return chunk ? { chunk, score } : null;
+      })
+      .filter((r): r is { chunk: Chunk; score: number } => r !== null);
+  }
+
+  /**
+   * 지정된 청크 ID 부분집합에 대해 BM25 점수를 계산합니다.
+   * 퍼지 검색 후보군에서 관련성 재랭킹 시 사용합니다.
+   * @param query 검색 쿼리
+   * @param chunkIds BM25 점수를 계산할 청크 ID 배열
+   * @returns chunkId → BM25 점수 맵
+   */
+  bm25ScoreSubset(query: string, chunkIds: string[]): Map<string, number> {
+    return this.bm25Index.scoreSubset(query, chunkIds);
+  }
+
+  /**
+   * 퍼지 검색 - 트라이그램(문자 3-그램) 유사도 기반
+   * 오타나 유사한 단어도 검색 결과에 포함시킵니다.
+   */
+  fuzzySearch(query: string, k?: number): Array<{ chunk: Chunk; score: number }> {
+    const topK = k || this.config.topK;
+    const chunks = this.metadataStore.getAllChunks();
+    return fuzzySearchFn(query, chunks, topK);
   }
 
   /**
