@@ -153,6 +153,50 @@ export class BM25Index {
   }
 
   /**
+   * 지정된 청크 ID 부분집합에 대해 BM25 점수를 계산합니다.
+   * 퍼지 검색 후보군에 대해 BM25 관련성 점수를 매길 때 사용합니다.
+   * @param query 검색 쿼리
+   * @param chunkIds BM25 점수를 계산할 청크 ID 집합
+   * @returns chunkId → BM25 점수 맵 (점수 > 0인 청크만 포함)
+   */
+  scoreSubset(query: string, chunkIds: string[]): Map<string, number> {
+    const scores = new Map<string, number>();
+    if (this.totalDocs === 0 || chunkIds.length === 0) return scores;
+
+    const queryTokens = tokenize(query);
+    if (queryTokens.length === 0) return scores;
+
+    const avgdl = this.totalLength / this.totalDocs;
+    const chunkIdSet = new Set(chunkIds);
+
+    for (const chunkId of chunkIdSet) {
+      const termFreq = this.docTermFreq.get(chunkId);
+      if (!termFreq) continue;
+
+      const dl = this.docLengths.get(chunkId) ?? 0;
+      let score = 0;
+
+      for (const term of queryTokens) {
+        const idf = this.idf(term);
+        if (idf === 0) continue;
+
+        const tf = termFreq.get(term) ?? 0;
+        if (tf === 0) continue;
+
+        const numerator = tf * (this.k1 + 1);
+        const denominator = tf + this.k1 * (1 - this.b + (this.b * dl) / avgdl);
+        score += idf * (numerator / denominator);
+      }
+
+      if (score > 0) {
+        scores.set(chunkId, score);
+      }
+    }
+
+    return scores;
+  }
+
+  /**
    * 청크 목록으로 인덱스를 완전히 재구성합니다.
    */
   buildFromChunks(chunks: Chunk[]): void {

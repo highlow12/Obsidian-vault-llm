@@ -249,6 +249,17 @@ export class Indexer {
   }
 
   /**
+   * 지정된 청크 ID 부분집합에 대해 BM25 점수를 계산합니다.
+   * 퍼지 검색 후보군에서 관련성 재랭킹 시 사용합니다.
+   * @param query 검색 쿼리
+   * @param chunkIds BM25 점수를 계산할 청크 ID 배열
+   * @returns chunkId → BM25 점수 맵
+   */
+  bm25ScoreSubset(query: string, chunkIds: string[]): Map<string, number> {
+    return this.bm25Index.scoreSubset(query, chunkIds);
+  }
+
+  /**
    * 퍼지 검색 - 트라이그램(문자 3-그램) 유사도 기반
    * 오타나 유사한 단어도 검색 결과에 포함시킵니다.
    */
