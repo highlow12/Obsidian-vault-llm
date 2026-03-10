@@ -1,4 +1,4 @@
-import { Notice, Plugin, normalizePath, TFile, FileSystemAdapter } from "obsidian";
+import { Notice, Plugin, normalizePath, TFile, FileSystemAdapter, prepareFuzzySearch } from "obsidian";
 import type { ConversationTurn } from "./conversation";
 import { saveConversationFromTurns } from "./conversationStore";
 import { OvlApiClient } from "./api";
@@ -9,7 +9,7 @@ import { OvlSettingTab } from "./settings";
 import { DEFAULT_SETTINGS, OvlSettings, EMBEDDING_PRESETS } from "./types";
 import { ChatView, VIEW_TYPE_OVL_CHAT } from "./views/chatView";
 import { Indexer } from "./indexing/indexer";
-import { SearchEngine } from "./indexing/searchEngine";
+import { SearchEngine, ObsidianSearchFn } from "./indexing/searchEngine";
 import { VaultWatcher } from "./vaultWatcher";
 import { join } from "path";
 import type { AssistantReplyStreamOptions } from "./pluginApi";
@@ -128,11 +128,29 @@ export default class OvlPlugin extends Plugin {
 
       await this.indexer.initialize();
 
+      // Obsidian의 prepareFuzzySearch를 활용한 검색 함수 생성
+      // 퍼지 검색을 대체하여 관련도 점수 기반 후보 생성에 사용합니다.
+      // 참고: prepareFuzzySearch는 모든 청크를 순회하므로, 청크 수가 매우 많은 경우
+      // 성능에 영향을 줄 수 있습니다. 이 경우 SearchEngine 내부의 BM25/퍼지 검색을
+      // 폴백으로 활용하거나, candidateK 배수를 줄이는 것을 고려하세요.
+      const indexerRef = this.indexer;
+      const obsidianSearchFn: ObsidianSearchFn = (query: string) => {
+        if (!indexerRef) return [];
+        const searchFn = prepareFuzzySearch(query);
+        const allChunks = indexerRef.getAllChunks();
+        return allChunks
+          .map((chunk) => ({ chunk, result: searchFn(chunk.text) }))
+          .filter((r): r is typeof r & { result: NonNullable<typeof r.result> } => r.result !== null)
+          .sort((a, b) => b.result.score - a.result.score)
+          .map((r) => ({ chunk: r.chunk, score: r.result.score }));
+      };
+
       // 하이브리드 검색 엔진 생성 (트레이스 로그 경로 포함)
       this.searchEngine = new SearchEngine(
         this.indexer,
         traceLogPath,
-        (entry) => appendHybridSearchLog(this.app, this.manifest, entry)
+        (entry) => appendHybridSearchLog(this.app, this.manifest, entry),
+        obsidianSearchFn
       );
 
       // 볼트 워처 설정

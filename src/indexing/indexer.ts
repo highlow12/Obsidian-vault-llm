@@ -260,6 +260,14 @@ export class Indexer {
   }
 
   /**
+   * 모든 청크를 반환합니다.
+   * Obsidian API 검색 등 외부 검색 함수에서 청크 풀을 활용할 때 사용합니다.
+   */
+  getAllChunks(): Chunk[] {
+    return this.metadataStore.getAllChunks();
+  }
+
+  /**
    * 퍼지 검색 - 트라이그램(문자 3-그램) 유사도 기반
    * 오타나 유사한 단어도 검색 결과에 포함시킵니다.
    */
