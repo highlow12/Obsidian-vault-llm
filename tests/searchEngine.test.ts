@@ -855,3 +855,147 @@ test("SearchEngine.hybridSearch - 부정 태그/속성 필터는 결과를 제�
 
   mockIndexer.getSearchResultsWithMetadata = originalGetSearchResultsWithMetadata;
 });
+
+test("SearchEngine.hybridSearch - requiredProperties/excludedProperties 필터 적용", async () => {
+  const mockIndexer = new MockIndexer() as any;
+
+  const hasAuthorChunk = createChunk("has-author", "note-has", "저자 있음");
+  const noAuthorChunk = createChunk("no-author", "note-no", "저자 없음");
+
+  mockIndexer.setFuzzyResults([
+    { chunk: hasAuthorChunk, score: 0.9 },
+    { chunk: noAuthorChunk, score: 0.8 },
+  ]);
+  mockIndexer.setBm25SubsetScores(new Map([["has-author", 2.0], ["no-author", 1.5]]));
+
+  const origGetMeta = mockIndexer.getSearchResultsWithMetadata.bind(mockIndexer);
+  mockIndexer.getSearchResultsWithMetadata = (results: Array<{ chunk: Chunk; score: number }>) =>
+    results.map((r) => ({
+      chunk: r.chunk,
+      score: r.score,
+      note: r.chunk.noteId === "note-has"
+        ? {
+            id: "note-has", path: "docs/has.md", title: "Has", tags: [],
+            links: [], frontmatter: { author: "alice", draft: true },
+            updatedAt: Date.now(), hash: "h",
+          }
+        : {
+            id: "note-no", path: "docs/no.md", title: "No", tags: [],
+            links: [], frontmatter: {},
+            updatedAt: Date.now(), hash: "n",
+          },
+    }));
+
+  const searchEngine = new SearchEngine(mockIndexer);
+  // author 속성이 있고 draft 속성이 없는 노트만 포함
+  const filter: SearchFilter = {
+    requiredProperties: ["author"],
+    excludedProperties: ["draft"],
+  };
+
+  const results = await searchEngine.hybridSearch("저자", 3, filter);
+
+  // draft가 있으므로 has-author도 제외됨 → 결과 없음
+  assert.strictEqual(results.length, 0);
+
+  // draft 없는 경우만 포함하는 필터
+  const filter2: SearchFilter = {
+    requiredProperties: ["author"],
+  };
+  const results2 = await searchEngine.hybridSearch("저자", 3, filter2);
+  assert.strictEqual(results2.length, 1);
+  assert.strictEqual(results2[0].chunk.id, "has-author");
+
+  mockIndexer.getSearchResultsWithMetadata = origGetMeta;
+});
+
+test("SearchEngine.hybridSearch - frontmatterOR 필터 적용", async () => {
+  const mockIndexer = new MockIndexer() as any;
+
+  const doneChunk = createChunk("done", "note-done", "완료 문서");
+  const progressChunk = createChunk("progress", "note-progress", "진행중 문서");
+  const blockedChunk = createChunk("blocked", "note-blocked", "차단 문서");
+
+  mockIndexer.setFuzzyResults([
+    { chunk: doneChunk, score: 0.9 },
+    { chunk: progressChunk, score: 0.85 },
+    { chunk: blockedChunk, score: 0.8 },
+  ]);
+  mockIndexer.setBm25SubsetScores(new Map([["done", 2.0], ["progress", 1.9], ["blocked", 1.0]]));
+
+  const origGetMeta = mockIndexer.getSearchResultsWithMetadata.bind(mockIndexer);
+  mockIndexer.getSearchResultsWithMetadata = (results: Array<{ chunk: Chunk; score: number }>) =>
+    results.map((r) => {
+      const statusMap: Record<string, string> = {
+        "note-done": "done",
+        "note-progress": "in-progress",
+        "note-blocked": "blocked",
+      };
+      return {
+        chunk: r.chunk,
+        score: r.score,
+        note: {
+          id: r.chunk.noteId, path: `docs/${r.chunk.id}.md`,
+          title: r.chunk.id, tags: [], links: [],
+          frontmatter: { status: statusMap[r.chunk.noteId] },
+          updatedAt: Date.now(), hash: r.chunk.id,
+        },
+      };
+    });
+
+  const searchEngine = new SearchEngine(mockIndexer);
+  const filter: SearchFilter = {
+    frontmatterOR: { status: ["done", "in-progress"] },
+  };
+
+  const results = await searchEngine.hybridSearch("작업", 5, filter);
+
+  assert.strictEqual(results.length, 2);
+  const ids = results.map((r) => r.chunk.id);
+  assert.ok(ids.includes("done"));
+  assert.ok(ids.includes("progress"));
+  assert.ok(!ids.includes("blocked"));
+
+  mockIndexer.getSearchResultsWithMetadata = origGetMeta;
+});
+
+test("SearchEngine.hybridSearch - frontmatterComparisons 필터 적용", async () => {
+  const mockIndexer = new MockIndexer() as any;
+
+  const highChunk = createChunk("high", "note-high", "높은 우선순위");
+  const lowChunk = createChunk("low", "note-low", "낮은 우선순위");
+
+  mockIndexer.setFuzzyResults([
+    { chunk: highChunk, score: 0.9 },
+    { chunk: lowChunk, score: 0.8 },
+  ]);
+  mockIndexer.setBm25SubsetScores(new Map([["high", 2.0], ["low", 1.5]]));
+
+  const origGetMeta = mockIndexer.getSearchResultsWithMetadata.bind(mockIndexer);
+  mockIndexer.getSearchResultsWithMetadata = (results: Array<{ chunk: Chunk; score: number }>) =>
+    results.map((r) => ({
+      chunk: r.chunk,
+      score: r.score,
+      note: {
+        id: r.chunk.noteId,
+        path: `docs/${r.chunk.id}.md`,
+        title: r.chunk.id,
+        tags: [], links: [],
+        frontmatter: { priority: r.chunk.id === "high" ? 5 : 2 },
+        updatedAt: Date.now(),
+        hash: r.chunk.id,
+      },
+    }));
+
+  const searchEngine = new SearchEngine(mockIndexer);
+  const filter: SearchFilter = {
+    frontmatterComparisons: [{ key: "priority", op: ">=", value: 4 }],
+  };
+
+  const results = await searchEngine.hybridSearch("우선순위", 3, filter);
+
+  assert.strictEqual(results.length, 1);
+  assert.strictEqual(results[0].chunk.id, "high");
+
+  mockIndexer.getSearchResultsWithMetadata = origGetMeta;
+});

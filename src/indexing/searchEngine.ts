@@ -230,6 +230,81 @@ function matchesFilter(note: NoteMetadata, filter?: SearchFilter): boolean {
     }
   }
 
+  if (filter.requiredProperties && filter.requiredProperties.length > 0) {
+    for (const propName of filter.requiredProperties) {
+      const value = getNestedValue(note.frontmatter, propName);
+      if (value === undefined || value === null) {
+        return false;
+      }
+    }
+  }
+
+  if (filter.excludedProperties && filter.excludedProperties.length > 0) {
+    for (const propName of filter.excludedProperties) {
+      const value = getNestedValue(note.frontmatter, propName);
+      if (value !== undefined && value !== null) {
+        return false;
+      }
+    }
+  }
+
+  if (filter.frontmatterOR) {
+    for (const [keyPath, allowedValues] of Object.entries(filter.frontmatterOR)) {
+      const actualValue = getNestedValue(note.frontmatter, keyPath);
+      const anyMatch = allowedValues.some((allowed) => isPrimitiveEqual(actualValue, allowed));
+      if (!anyMatch) {
+        return false;
+      }
+    }
+  }
+
+  if (filter.excludedFrontmatterOR) {
+    for (const [keyPath, excludedValues] of Object.entries(filter.excludedFrontmatterOR)) {
+      const actualValue = getNestedValue(note.frontmatter, keyPath);
+      const anyMatch = excludedValues.some((excluded) => isPrimitiveEqual(actualValue, excluded));
+      if (anyMatch) {
+        return false;
+      }
+    }
+  }
+
+  if (filter.frontmatterComparisons && filter.frontmatterComparisons.length > 0) {
+    for (const comp of filter.frontmatterComparisons) {
+      const actualValue = getNestedValue(note.frontmatter, comp.key);
+      if (actualValue === undefined || actualValue === null) {
+        // 속성이 없는 경우: excluded 비교는 통과, 포함 비교는 실패
+        if (!comp.excluded) return false;
+        continue;
+      }
+      const actualNum = Number(actualValue);
+      const expectedNum = Number(comp.value);
+
+      let conditionMet: boolean;
+      if (!Number.isNaN(actualNum) && !Number.isNaN(expectedNum)) {
+        // 숫자 비교
+        if (comp.op === ">") conditionMet = actualNum > expectedNum;
+        else if (comp.op === "<") conditionMet = actualNum < expectedNum;
+        else if (comp.op === ">=") conditionMet = actualNum >= expectedNum;
+        else if (comp.op === "<=") conditionMet = actualNum <= expectedNum;
+        else conditionMet = actualNum !== expectedNum; // "!="
+      } else {
+        // 문자열 사전순 비교
+        const actualStr = String(actualValue).toLowerCase();
+        const expectedStr = String(comp.value).toLowerCase();
+        if (comp.op === ">") conditionMet = actualStr > expectedStr;
+        else if (comp.op === "<") conditionMet = actualStr < expectedStr;
+        else if (comp.op === ">=") conditionMet = actualStr >= expectedStr;
+        else if (comp.op === "<=") conditionMet = actualStr <= expectedStr;
+        else conditionMet = actualStr !== expectedStr; // "!="
+      }
+
+      // excluded=true이면 조건에 해당하는 노트를 제외, false이면 해당 노트만 포함
+      if (comp.excluded ? conditionMet : !conditionMet) {
+        return false;
+      }
+    }
+  }
+
   if (filter.frontmatter) {
     for (const [keyPath, expectedValue] of Object.entries(filter.frontmatter)) {
       const actualValue = getNestedValue(note.frontmatter, keyPath);
