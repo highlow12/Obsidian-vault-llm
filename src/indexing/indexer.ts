@@ -196,6 +196,45 @@ export class Indexer {
   }
 
   /**
+   * 지정된 청크 ID 부분집합에 대해 벡터 유사도 점수를 계산합니다.
+   * Obsidian 1차 후보군 내부에서만 벡터 재랭킹할 때 사용합니다.
+   * @param query 검색 쿼리
+   * @param chunkIds 점수를 계산할 청크 ID 배열
+   * @returns chunkId → 벡터 유사도 점수 맵
+   */
+  async vectorScoreSubset(query: string, chunkIds: string[]): Promise<Map<string, number>> {
+    if (chunkIds.length === 0) {
+      return new Map();
+    }
+
+    const queryTextForEmbedding = buildQueryEmbeddingText(query);
+    const queryEmbedding = await this.embeddingGenerator.embed(queryTextForEmbedding || query);
+
+    const currentDimension = this.vectorStore.getDimension();
+    if (currentDimension !== null && queryEmbedding.length !== currentDimension) {
+      console.warn(
+        `쿼리 차원(${queryEmbedding.length})과 인덱스 차원(${currentDimension})이 달라 부분 벡터 점수 계산을 건너뜁니다.`
+      );
+      return new Map();
+    }
+
+    const uniqueChunkIds = Array.from(new Set(chunkIds));
+    const result = new Map<string, number>();
+
+    for (const chunkId of uniqueChunkIds) {
+      const embedding = this.vectorStore.getEmbedding(chunkId);
+      if (!embedding) {
+        continue;
+      }
+
+      const score = this.cosineSimilarity(queryEmbedding, embedding);
+      result.set(chunkId, score);
+    }
+
+    return result;
+  }
+
+  /**
    * 키워드 기반 검색 (인덱싱된 청크에서 키워드 매칭)
    * @param keywordQuery "keyword1 OR keyword2" 형식의 키워드 쿼리
    */
@@ -304,6 +343,27 @@ export class Indexer {
       note: NoteMetadata;
       score: number;
     }>;
+  }
+
+  /**
+   * 노트 ID 생성
+   */
+  private cosineSimilarity(a: number[], b: number[]): number {
+    if (a.length !== b.length) {
+      throw new Error("벡터 길이가 일치하지 않습니다");
+    }
+
+    let dotProduct = 0;
+    let normA = 0;
+    let normB = 0;
+
+    for (let i = 0; i < a.length; i++) {
+      dotProduct += a[i] * b[i];
+      normA += a[i] * a[i];
+      normB += b[i] * b[i];
+    }
+
+    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
   }
 
   /**

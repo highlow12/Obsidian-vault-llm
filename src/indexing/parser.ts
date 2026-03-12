@@ -73,8 +73,8 @@ function extractTags(content: string, frontmatter: Record<string, unknown>): str
     });
   }
 
-  // 본문에서 #태그 추출
-  const hashtagRegex = /#([a-zA-Z0-9가-힣_-]+)/g;
+  // 본문에서 #태그 및 #태그/하위태그 추출
+  const hashtagRegex = /#([a-zA-Z0-9가-힣_-]+(?:\/[a-zA-Z0-9가-힣_-]+)*)/g;
   let match;
   while ((match = hashtagRegex.exec(content)) !== null) {
     tags.add(match[1]);

@@ -10,6 +10,7 @@ import { DEFAULT_SETTINGS, OvlSettings, EMBEDDING_PRESETS } from "./types";
 import { ChatView, VIEW_TYPE_OVL_CHAT } from "./views/chatView";
 import { Indexer } from "./indexing/indexer";
 import { SearchEngine, ObsidianSearchFn } from "./indexing/searchEngine";
+import type { SearchFilter } from "./indexing/types";
 import { VaultWatcher } from "./vaultWatcher";
 import { join } from "path";
 import type { AssistantReplyStreamOptions } from "./pluginApi";
@@ -229,12 +230,15 @@ export default class OvlPlugin extends Plugin {
   /**
    * 하이브리드 검색 수행 (벡터 + 키워드 + RRF)
    */
-  public async search(query: string): Promise<Array<{ chunk: any; note: any; score: number }>> {
+  public async search(
+    query: string,
+    filter?: SearchFilter
+  ): Promise<Array<{ chunk: any; note: any; score: number }>> {
     if (!this.searchEngine) {
       throw new Error("인덱싱이 활성화되지 않았습니다");
     }
 
-    return this.searchEngine.hybridSearch(query, this.settings.topK);
+    return this.searchEngine.hybridSearch(query, this.settings.topK, filter);
   }
 
   private async openChatView(): Promise<void> {

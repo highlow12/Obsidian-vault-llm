@@ -1,6 +1,6 @@
 import type { ConversationTurn } from "./conversation";
 import type { OvlSettings } from "./types";
-import type { Chunk, NoteMetadata } from "./indexing/types";
+import type { Chunk, NoteMetadata, SearchFilter } from "./indexing/types";
 import type { App, PluginManifest } from "obsidian";
 import type { ChatSessionSummary } from "./chatSessionStore";
 import type { MultiNoteSaveResult } from "./topicSeparation";
@@ -37,7 +37,10 @@ export type PluginChatApi = {
   listChatSessions: () => Promise<ChatSessionSummary[]>;
   loadChatSession: (sessionId: string) => Promise<ConversationTurn[]>;
   deleteChatSession: (sessionId: string) => Promise<void>;
-  search: (query: string) => Promise<Array<{ chunk: Chunk; note: NoteMetadata; score: number }>>;
+  search: (
+    query: string,
+    filter?: SearchFilter
+  ) => Promise<Array<{ chunk: Chunk; note: NoteMetadata; score: number }>>;
   saveWithEmbeddingTopicSeparation: (
     turns: ConversationTurn[],
     baseTitle: string,

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert";
 import { computeRRF, RRF_K, SearchEngine, HybridSearchResult, ObsidianSearchFn } from "../src/indexing/searchEngine.js";
-import { Chunk, NoteMetadata } from "../src/indexing/types.js";
+import { Chunk, NoteMetadata, SearchFilter } from "../src/indexing/types.js";
 
 // ============= computeRRF 테스트 =============
 
@@ -87,6 +87,7 @@ class MockIndexer {
   private keywordResults: Array<{ chunk: Chunk; score: number }> = [];
   private fuzzyResultsData: Array<{ chunk: Chunk; score: number }> = [];
   private bm25SubsetMap: Map<string, number> = new Map();
+  private vectorSubsetMap: Map<string, number> = new Map();
 
   setVectorResults(results: Array<{ chunk: Chunk; score: number }>) {
     this.vectorResults = results;
@@ -102,6 +103,10 @@ class MockIndexer {
 
   setBm25SubsetScores(scores: Map<string, number>) {
     this.bm25SubsetMap = scores;
+  }
+
+  setVectorSubsetScores(scores: Map<string, number>) {
+    this.vectorSubsetMap = scores;
   }
 
   async search(query: string, k?: number): Promise<Array<{ chunk: Chunk; score: number }>> {
@@ -121,6 +126,17 @@ class MockIndexer {
     const result = new Map<string, number>();
     for (const id of chunkIds) {
       const score = this.bm25SubsetMap.get(id);
+      if (score !== undefined) {
+        result.set(id, score);
+      }
+    }
+    return result;
+  }
+
+  async vectorScoreSubset(query: string, chunkIds: string[]): Promise<Map<string, number>> {
+    const result = new Map<string, number>();
+    for (const id of chunkIds) {
+      const score = this.vectorSubsetMap.get(id);
       if (score !== undefined) {
         result.set(id, score);
       }
@@ -499,4 +515,343 @@ test("SearchEngine.hybridSearch - Obsidian 검색 + 벡터 검색 RRF 통합", a
   assert.strictEqual(results[0].chunk.id, "obs", "Obsidian+벡터 공통 청크가 RRF 최상위");
   assert.ok(results[0].obsidianScore !== undefined, "obsidianScore 포함");
   assert.ok(results[0].vectorScore !== undefined, "vectorScore 포함");
+});
+
+test("SearchEngine.hybridSearch - Obsidian 후보군 내부에서만 벡터 재랭킹", async () => {
+  const mockIndexer = new MockIndexer() as any;
+
+  const obsidianCandidate = createChunk("obs-candidate", "note1", "Obsidian 후보");
+  const globalVectorOnly = createChunk("global-vector", "note2", "글로벌 벡터 전용");
+
+  // 전역 벡터 검색에만 존재하는 청크를 넣어도,
+  // Obsidian 후보군 내부 재랭킹 구조에서는 최종 결과에 포함되면 안 됩니다.
+  mockIndexer.setVectorResults([{ chunk: globalVectorOnly, score: 0.99 }]);
+  mockIndexer.setVectorSubsetScores(new Map([["obs-candidate", 0.8]]));
+  mockIndexer.setFuzzyResults([]);
+
+  const obsidianSearchFn: ObsidianSearchFn = (_query: string) => [
+    { chunk: obsidianCandidate, score: 0.9 },
+  ];
+
+  const searchEngine = new SearchEngine(mockIndexer, undefined, undefined, obsidianSearchFn);
+  const results = await searchEngine.hybridSearch("query", 3);
+
+  assert.strictEqual(results.length, 1);
+  assert.strictEqual(results[0].chunk.id, "obs-candidate");
+});
+
+test("SearchEngine.hybridSearch - 폴더 필터 include/exclude 적용", async () => {
+  const mockIndexer = new MockIndexer() as any;
+
+  const docsChunk = createChunk("docs-1", "docs-note", "docs 내용");
+  const privateChunk = createChunk("private-1", "private-note", "private 내용");
+
+  mockIndexer.setVectorResults([
+    { chunk: docsChunk, score: 0.9 },
+    { chunk: privateChunk, score: 0.8 },
+  ]);
+  mockIndexer.setFuzzyResults([
+    { chunk: docsChunk, score: 0.7 },
+    { chunk: privateChunk, score: 0.6 },
+  ]);
+  mockIndexer.setBm25SubsetScores(new Map([["docs-1", 3.0], ["private-1", 2.0]]));
+
+  const originalGetSearchResultsWithMetadata = mockIndexer.getSearchResultsWithMetadata.bind(mockIndexer);
+  mockIndexer.getSearchResultsWithMetadata = (
+    results: Array<{ chunk: Chunk; score: number }>
+  ) => {
+    return results.map((r) => ({
+      chunk: r.chunk,
+      score: r.score,
+      note: r.chunk.noteId === "docs-note"
+        ? {
+            id: "docs-note",
+            path: "docs/guide.md",
+            title: "Guide",
+            tags: ["ai"],
+            links: [],
+            frontmatter: { status: "done" },
+            updatedAt: new Date("2024-06-10").getTime(),
+            hash: "h1",
+          }
+        : {
+            id: "private-note",
+            path: "private/secret.md",
+            title: "Secret",
+            tags: ["internal"],
+            links: [],
+            frontmatter: { status: "draft" },
+            updatedAt: new Date("2024-06-10").getTime(),
+            hash: "h2",
+          },
+    }));
+  };
+
+  const searchEngine = new SearchEngine(mockIndexer);
+  const filter: SearchFilter = {
+    folders: ["docs"],
+    excludedFolders: ["private"],
+  };
+
+  const results = await searchEngine.hybridSearch("가이드", 3, filter);
+
+  assert.strictEqual(results.length, 1);
+  assert.strictEqual(results[0].chunk.id, "docs-1");
+
+  mockIndexer.getSearchResultsWithMetadata = originalGetSearchResultsWithMetadata;
+});
+
+test("SearchEngine.hybridSearch - 태그 OR 기본과 frontmatter 중첩 키 필터", async () => {
+  const mockIndexer = new MockIndexer() as any;
+
+  const matchChunk = createChunk("match", "note-match", "매칭 문서");
+  const mismatchChunk = createChunk("mismatch", "note-mismatch", "비매칭 문서");
+
+  mockIndexer.setVectorResults([
+    { chunk: matchChunk, score: 0.95 },
+    { chunk: mismatchChunk, score: 0.85 },
+  ]);
+  mockIndexer.setFuzzyResults([
+    { chunk: matchChunk, score: 0.8 },
+    { chunk: mismatchChunk, score: 0.7 },
+  ]);
+  mockIndexer.setBm25SubsetScores(new Map([["match", 2.5], ["mismatch", 1.5]]));
+
+  const originalGetSearchResultsWithMetadata = mockIndexer.getSearchResultsWithMetadata.bind(mockIndexer);
+  mockIndexer.getSearchResultsWithMetadata = (
+    results: Array<{ chunk: Chunk; score: number }>
+  ) => {
+    return results.map((r) => ({
+      chunk: r.chunk,
+      score: r.score,
+      note: r.chunk.noteId === "note-match"
+        ? {
+            id: "note-match",
+            path: "docs/rag.md",
+            title: "RAG",
+            tags: ["ml", "search"],
+            links: [],
+            frontmatter: { author: { name: "kim" }, status: "done", date: "2024-04-12" },
+            updatedAt: new Date("2024-04-12").getTime(),
+            hash: "hm",
+          }
+        : {
+            id: "note-mismatch",
+            path: "docs/ops.md",
+            title: "OPS",
+            tags: ["ops"],
+            links: [],
+            frontmatter: { author: { name: "lee" }, status: "draft", date: "2023-01-01" },
+            updatedAt: new Date("2023-01-01").getTime(),
+            hash: "hn",
+          },
+    }));
+  };
+
+  const searchEngine = new SearchEngine(mockIndexer);
+  const filter: SearchFilter = {
+    tags: ["search", "ai"],
+    tagOperator: "OR",
+    frontmatter: {
+      "author.name": "kim",
+      status: "done",
+    },
+    dateRange: {
+      from: new Date("2024-01-01"),
+      to: new Date("2024-12-31"),
+    },
+  };
+
+  const results = await searchEngine.hybridSearch("RAG", 3, filter);
+
+  assert.strictEqual(results.length, 1);
+  assert.strictEqual(results[0].chunk.id, "match");
+
+  mockIndexer.getSearchResultsWithMetadata = originalGetSearchResultsWithMetadata;
+});
+
+test("SearchEngine.hybridSearch - file include/exclude 필터 적용", async () => {
+  const mockIndexer = new MockIndexer() as any;
+
+  const includeChunk = createChunk("include", "note-include", "가이드 본문");
+  const excludeChunk = createChunk("exclude", "note-exclude", "초안 본문");
+
+  mockIndexer.setVectorResults([
+    { chunk: includeChunk, score: 0.9 },
+    { chunk: excludeChunk, score: 0.8 },
+  ]);
+  mockIndexer.setFuzzyResults([
+    { chunk: includeChunk, score: 0.7 },
+    { chunk: excludeChunk, score: 0.6 },
+  ]);
+  mockIndexer.setBm25SubsetScores(new Map([["include", 2.2], ["exclude", 1.0]]));
+
+  const originalGetSearchResultsWithMetadata = mockIndexer.getSearchResultsWithMetadata.bind(mockIndexer);
+  mockIndexer.getSearchResultsWithMetadata = (
+    results: Array<{ chunk: Chunk; score: number }>
+  ) => {
+    return results.map((r) => ({
+      chunk: r.chunk,
+      score: r.score,
+      note: r.chunk.noteId === "note-include"
+        ? {
+            id: "note-include",
+            path: "docs/guide.md",
+            title: "Guide",
+            tags: ["rag"],
+            links: [],
+            frontmatter: {},
+            updatedAt: Date.now(),
+            hash: "i",
+          }
+        : {
+            id: "note-exclude",
+            path: "docs/draft.md",
+            title: "Draft",
+            tags: ["rag"],
+            links: [],
+            frontmatter: {},
+            updatedAt: Date.now(),
+            hash: "e",
+          },
+    }));
+  };
+
+  const searchEngine = new SearchEngine(mockIndexer);
+  const filter: SearchFilter = {
+    filePaths: ["guide.md"],
+    excludedFilePaths: ["draft.md"],
+  };
+
+  const results = await searchEngine.hybridSearch("가이드", 3, filter);
+
+  assert.strictEqual(results.length, 1);
+  assert.strictEqual(results[0].chunk.id, "include");
+
+  mockIndexer.getSearchResultsWithMetadata = originalGetSearchResultsWithMetadata;
+});
+
+test("SearchEngine.hybridSearch - 상위 태그 필터가 하위 태그를 매칭", async () => {
+  const mockIndexer = new MockIndexer() as any;
+
+  const nestedTagChunk = createChunk("nested", "note-nested", "계층 태그 문서");
+  const otherTagChunk = createChunk("other", "note-other", "다른 태그 문서");
+
+  mockIndexer.setVectorResults([
+    { chunk: nestedTagChunk, score: 0.92 },
+    { chunk: otherTagChunk, score: 0.82 },
+  ]);
+  mockIndexer.setFuzzyResults([
+    { chunk: nestedTagChunk, score: 0.75 },
+    { chunk: otherTagChunk, score: 0.65 },
+  ]);
+  mockIndexer.setBm25SubsetScores(new Map([["nested", 2.4], ["other", 1.1]]));
+
+  const originalGetSearchResultsWithMetadata = mockIndexer.getSearchResultsWithMetadata.bind(mockIndexer);
+  mockIndexer.getSearchResultsWithMetadata = (
+    results: Array<{ chunk: Chunk; score: number }>
+  ) => {
+    return results.map((r) => ({
+      chunk: r.chunk,
+      score: r.score,
+      note: r.chunk.noteId === "note-nested"
+        ? {
+            id: "note-nested",
+            path: "docs/nested.md",
+            title: "Nested",
+            tags: ["개발/검색/RAG"],
+            links: [],
+            frontmatter: {},
+            updatedAt: Date.now(),
+            hash: "nested",
+          }
+        : {
+            id: "note-other",
+            path: "docs/other.md",
+            title: "Other",
+            tags: ["운영/배포"],
+            links: [],
+            frontmatter: {},
+            updatedAt: Date.now(),
+            hash: "other",
+          },
+    }));
+  };
+
+  const searchEngine = new SearchEngine(mockIndexer);
+  const filter: SearchFilter = {
+    tags: ["개발"],
+    tagOperator: "OR",
+  };
+
+  const results = await searchEngine.hybridSearch("검색", 3, filter);
+
+  assert.strictEqual(results.length, 1);
+  assert.strictEqual(results[0].chunk.id, "nested");
+
+  mockIndexer.getSearchResultsWithMetadata = originalGetSearchResultsWithMetadata;
+});
+
+test("SearchEngine.hybridSearch - 부정 태그/속성 필터는 결과를 제외", async () => {
+  const mockIndexer = new MockIndexer() as any;
+
+  const keepChunk = createChunk("keep", "note-keep", "유지 문서");
+  const dropChunk = createChunk("drop", "note-drop", "제외 문서");
+
+  mockIndexer.setVectorResults([
+    { chunk: keepChunk, score: 0.93 },
+    { chunk: dropChunk, score: 0.83 },
+  ]);
+  mockIndexer.setFuzzyResults([
+    { chunk: keepChunk, score: 0.74 },
+    { chunk: dropChunk, score: 0.64 },
+  ]);
+  mockIndexer.setBm25SubsetScores(new Map([["keep", 2.1], ["drop", 1.2]]));
+
+  const originalGetSearchResultsWithMetadata = mockIndexer.getSearchResultsWithMetadata.bind(mockIndexer);
+  mockIndexer.getSearchResultsWithMetadata = (
+    results: Array<{ chunk: Chunk; score: number }>
+  ) => {
+    return results.map((r) => ({
+      chunk: r.chunk,
+      score: r.score,
+      note: r.chunk.noteId === "note-keep"
+        ? {
+            id: "note-keep",
+            path: "docs/keep.md",
+            title: "Keep",
+            tags: ["개발/검색"],
+            links: [],
+            frontmatter: { status: "done", author: { name: "lee" } },
+            updatedAt: Date.now(),
+            hash: "k",
+          }
+        : {
+            id: "note-drop",
+            path: "docs/drop.md",
+            title: "Drop",
+            tags: ["개발/실험"],
+            links: [],
+            frontmatter: { status: "done", author: { name: "kim" } },
+            updatedAt: Date.now(),
+            hash: "d",
+          },
+    }));
+  };
+
+  const searchEngine = new SearchEngine(mockIndexer);
+  const filter: SearchFilter = {
+    tags: ["개발"],
+    excludedTags: ["개발/실험"],
+    frontmatter: { status: "done" },
+    excludedFrontmatter: { "author.name": "kim" },
+    tagOperator: "OR",
+  };
+
+  const results = await searchEngine.hybridSearch("검색", 3, filter);
+
+  assert.strictEqual(results.length, 1);
+  assert.strictEqual(results[0].chunk.id, "keep");
+
+  mockIndexer.getSearchResultsWithMetadata = originalGetSearchResultsWithMetadata;
 });

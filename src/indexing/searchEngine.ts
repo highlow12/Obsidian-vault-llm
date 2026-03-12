@@ -2,7 +2,8 @@
 // 벡터 검색을 통한 의미론적 유사도도 함께 활용합니다.
 
 import { Indexer } from "./indexer";
-import { Chunk, NoteMetadata } from "./types";
+import { Chunk, NoteMetadata, SearchFilter } from "./types";
+import { parseSearchQuery } from "./searchFilterQuery";
 import { extractKeywords } from "../topicSeparation/keywordExtractor";
 import { buildQueryEmbeddingText } from "./queryKeywordEmbedding";
 import { appendRagTrace, RagTraceEntry } from "./ragTracer";
@@ -92,6 +93,177 @@ interface ExtendedSearchCapable {
   bm25Search?(query: string, k?: number): Array<{ chunk: Chunk; score: number }>;
   fuzzySearch?(query: string, k?: number): Array<{ chunk: Chunk; score: number }>;
   bm25ScoreSubset?(query: string, chunkIds: string[]): Map<string, number>;
+  vectorScoreSubset?(query: string, chunkIds: string[]): Promise<Map<string, number>>;
+}
+
+function normalizePath(path: string): string {
+  return path.replace(/\\/g, "/").replace(/^\/+/, "").toLowerCase();
+}
+
+function getNestedValue(source: Record<string, unknown>, keyPath: string): unknown {
+  const keys = keyPath.split(".").map((key) => key.trim()).filter((key) => key.length > 0);
+  let current: unknown = source;
+
+  for (const key of keys) {
+    if (!current || typeof current !== "object" || Array.isArray(current)) {
+      return undefined;
+    }
+    current = (current as Record<string, unknown>)[key];
+  }
+
+  return current;
+}
+
+function toDateValue(value: unknown): Date | undefined {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value;
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? undefined : date;
+  }
+
+  if (typeof value === "string") {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? undefined : date;
+  }
+
+  return undefined;
+}
+
+function isPrimitiveEqual(left: unknown, right: unknown): boolean {
+  if (typeof left === "string" && typeof right === "string") {
+    return left.toLowerCase() === right.toLowerCase();
+  }
+  return left === right;
+}
+
+function normalizeTag(tag: string): string {
+  return tag.trim().replace(/^#/, "").toLowerCase();
+}
+
+function matchesTagHierarchy(noteTag: string, filterTag: string): boolean {
+  const normalizedNoteTag = normalizeTag(noteTag);
+  const normalizedFilterTag = normalizeTag(filterTag);
+
+  return (
+    normalizedNoteTag === normalizedFilterTag ||
+    normalizedNoteTag.startsWith(`${normalizedFilterTag}/`)
+  );
+}
+
+function matchesFilter(note: NoteMetadata, filter?: SearchFilter): boolean {
+  if (!filter) {
+    return true;
+  }
+
+  const normalizedNotePath = normalizePath(note.path);
+  const includeFolders = (filter.folders ?? []).map((folder) => normalizePath(folder));
+  const excludeFolders = (filter.excludedFolders ?? []).map((folder) => normalizePath(folder));
+  const includeFiles = (filter.filePaths ?? []).map((file) => normalizePath(file));
+  const excludeFiles = (filter.excludedFilePaths ?? []).map((file) => normalizePath(file));
+
+  if (includeFolders.length > 0) {
+    const matchesInclude = includeFolders.some(
+      (folder) => normalizedNotePath === folder || normalizedNotePath.startsWith(`${folder}/`)
+    );
+    if (!matchesInclude) {
+      return false;
+    }
+  }
+
+  if (excludeFolders.length > 0) {
+    const matchesExclude = excludeFolders.some(
+      (folder) => normalizedNotePath === folder || normalizedNotePath.startsWith(`${folder}/`)
+    );
+    if (matchesExclude) {
+      return false;
+    }
+  }
+
+  if (includeFiles.length > 0) {
+    const matchesIncludeFile = includeFiles.some(
+      (file) => normalizedNotePath === file || normalizedNotePath.endsWith(`/${file}`)
+    );
+    if (!matchesIncludeFile) {
+      return false;
+    }
+  }
+
+  if (excludeFiles.length > 0) {
+    const matchesExcludeFile = excludeFiles.some(
+      (file) => normalizedNotePath === file || normalizedNotePath.endsWith(`/${file}`)
+    );
+    if (matchesExcludeFile) {
+      return false;
+    }
+  }
+
+  const normalizedNoteTags = note.tags.map((tag) => normalizeTag(tag));
+  const normalizedFilterTags = (filter.tags ?? []).map((tag) => normalizeTag(tag));
+  const normalizedExcludedTags = (filter.excludedTags ?? []).map((tag) => normalizeTag(tag));
+  if (normalizedFilterTags.length > 0) {
+    if (filter.tagOperator === "AND") {
+      const hasAllTags = normalizedFilterTags.every((filterTag) =>
+        normalizedNoteTags.some((noteTag) => matchesTagHierarchy(noteTag, filterTag))
+      );
+      if (!hasAllTags) {
+        return false;
+      }
+    } else {
+      const hasAnyTag = normalizedFilterTags.some((filterTag) =>
+        normalizedNoteTags.some((noteTag) => matchesTagHierarchy(noteTag, filterTag))
+      );
+      if (!hasAnyTag) {
+        return false;
+      }
+    }
+  }
+
+  if (normalizedExcludedTags.length > 0) {
+    const hasExcludedTag = normalizedExcludedTags.some((excludedTag) =>
+      normalizedNoteTags.some((noteTag) => matchesTagHierarchy(noteTag, excludedTag))
+    );
+    if (hasExcludedTag) {
+      return false;
+    }
+  }
+
+  if (filter.frontmatter) {
+    for (const [keyPath, expectedValue] of Object.entries(filter.frontmatter)) {
+      const actualValue = getNestedValue(note.frontmatter, keyPath);
+      if (!isPrimitiveEqual(actualValue, expectedValue)) {
+        return false;
+      }
+    }
+  }
+
+  if (filter.excludedFrontmatter) {
+    for (const [keyPath, excludedValue] of Object.entries(filter.excludedFrontmatter)) {
+      const actualValue = getNestedValue(note.frontmatter, keyPath);
+      if (isPrimitiveEqual(actualValue, excludedValue)) {
+        return false;
+      }
+    }
+  }
+
+  if (filter.dateRange?.from || filter.dateRange?.to) {
+    const frontmatterDate = getNestedValue(note.frontmatter, "date");
+    const comparableDate = toDateValue(frontmatterDate) ?? new Date(note.updatedAt);
+    if (Number.isNaN(comparableDate.getTime())) {
+      return false;
+    }
+
+    if (filter.dateRange.from && comparableDate < filter.dateRange.from) {
+      return false;
+    }
+    if (filter.dateRange.to && comparableDate > filter.dateRange.to) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 /**
@@ -132,26 +304,31 @@ export class SearchEngine {
    */
   async hybridSearch(
     query: string,
-    k?: number
+    k?: number,
+    filter?: SearchFilter
   ): Promise<HybridSearchResult[]> {
     const startTime = performance.now();
     const topK = k ?? 8;
+    const parsedQuery = parseSearchQuery(query);
+    const semanticQuery = parsedQuery.query || query;
+    const effectiveFilter = filter ?? parsedQuery.filter;
 
     // 의미 있는 명사 키워드 추출 (트레이스 로그용)
-    const keywords = extractKeywords(query);
+    const keywords = extractKeywords(semanticQuery);
     const keywordQuery = keywords.join(" OR ");
 
     // 검색 쿼리: 불용어 제거 후 남은 의미 있는 키워드만 사용
     // 키워드가 추출되지 않으면 원본 쿼리를 폴백으로 사용합니다.
-    const fuzzyQuery = keywords.length > 0 ? keywords.join(" ") : query;
+    const fuzzyQuery = keywords.length > 0 ? keywords.join(" ") : semanticQuery;
 
     // 벡터 검색을 위한 임베딩 텍스트 생성
-    const queryEmbeddingText = buildQueryEmbeddingText(query);
+    const queryEmbeddingText = buildQueryEmbeddingText(semanticQuery);
 
     // 확장 검색 기능 사용 가능 여부 확인
     const extendedIndexer = this.indexer as unknown as ExtendedSearchCapable;
     const hasFuzzy = typeof extendedIndexer.fuzzySearch === "function";
     const hasBm25Subset = typeof extendedIndexer.bm25ScoreSubset === "function";
+    const hasVectorSubset = typeof extendedIndexer.vectorScoreSubset === "function";
 
     const candidateK = topK * FUZZY_CANDIDATE_MULTIPLIER;
 
@@ -163,7 +340,7 @@ export class SearchEngine {
 
     if (this.obsidianSearchFn) {
       // Obsidian API 검색으로 후보 생성 (퍼지 검색 대체)
-      const obsidianResults = this.obsidianSearchFn(fuzzyQuery).slice(0, candidateK);
+      const obsidianResults = this.obsidianSearchFn(query);
       rawCandidates = obsidianResults;
 
       // Obsidian이 의미 있는 점수를 반환한 경우 별도 추적.
@@ -181,6 +358,13 @@ export class SearchEngine {
       }
     }
 
+    if (effectiveFilter) {
+      rawCandidates = this.indexer
+        .getSearchResultsWithMetadata(rawCandidates)
+        .filter((result) => matchesFilter(result.note, effectiveFilter))
+        .map((result) => ({ chunk: result.chunk, score: result.score }));
+    }
+
     // Phase 2: 정확도 정렬
     // - Obsidian 점수가 있으면 이미 정확도 순으로 정렬되어 있으므로 그대로 사용
     // - 점수가 없거나(또는 퍼지 검색 사용 시) BM25로 재랭킹하여 관련성을 확보
@@ -193,7 +377,7 @@ export class SearchEngine {
     } else if (rawCandidates.length > 0 && hasBm25Subset) {
       // Obsidian 점수 없음 또는 퍼지 검색 → BM25로 관련성 재랭킹
       const candidateChunkIds = rawCandidates.map((r) => r.chunk.id);
-      const bm25ScoreMap = extendedIndexer.bm25ScoreSubset!(query, candidateChunkIds);
+      const bm25ScoreMap = extendedIndexer.bm25ScoreSubset!(semanticQuery, candidateChunkIds);
       bm25ScoreByChunkId = bm25ScoreMap;
 
       // BM25 점수가 있는 후보 → BM25 점수 기준 정렬
@@ -208,8 +392,39 @@ export class SearchEngine {
       sortedCandidates = rawCandidates;
     }
 
-    // Phase 3: 벡터 검색 병렬 수행 (의미론적 유사도 보완)
-    const vectorResults = await this.indexer.search(queryEmbeddingText, candidateK);
+    // Phase 3: 벡터 검색 수행
+    // Obsidian 1차 결과가 있으면 해당 후보군 내부에서만 벡터 점수를 계산합니다.
+    let vectorResults: Array<{ chunk: Chunk; score: number }> = [];
+    const candidateChunkIdsForVector = sortedCandidates.map((r) => r.chunk.id);
+
+    if (candidateChunkIdsForVector.length > 0 && hasVectorSubset) {
+      const vectorScoreMap = await extendedIndexer.vectorScoreSubset!(
+        queryEmbeddingText,
+        candidateChunkIdsForVector
+      );
+
+      const candidateChunkById = new Map(sortedCandidates.map((r) => [r.chunk.id, r.chunk]));
+      vectorResults = candidateChunkIdsForVector
+        .map((id) => {
+          const chunk = candidateChunkById.get(id);
+          const score = vectorScoreMap.get(id);
+          if (!chunk || score === undefined) {
+            return null;
+          }
+          return { chunk, score };
+        })
+        .filter((r): r is { chunk: Chunk; score: number } => r !== null)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, candidateK);
+    } else {
+      vectorResults = await this.indexer.search(queryEmbeddingText, candidateK);
+      if (effectiveFilter) {
+        vectorResults = this.indexer
+          .getSearchResultsWithMetadata(vectorResults)
+          .filter((result) => matchesFilter(result.note, effectiveFilter))
+          .map((result) => ({ chunk: result.chunk, score: result.score }));
+      }
+    }
 
     // Phase 4: 정확도 정렬 결과와 벡터 검색 결과를 RRF로 통합
     const primaryRanks = new Map<string, number>(

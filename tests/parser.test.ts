@@ -52,6 +52,17 @@ test("parseMarkdown - 태그 추출", () => {
   assert.deepStrictEqual(result.tags.sort(), ["태그1", "태그2"].sort());
 });
 
+test("parseMarkdown - 계층형 태그 추출", () => {
+  const content = `계층 태그 #개발/검색 과 #개발/검색/RAG 를 포함합니다.`;
+
+  const result = parseMarkdown("nested-tags.md", content);
+
+  assert.deepStrictEqual(
+    result.tags.sort(),
+    ["개발/검색", "개발/검색/RAG"].sort()
+  );
+});
+
 test("parseMarkdown - 링크 추출", () => {
   const content = `[[노트1]] 그리고 [[노트2]] 그리고 [[노트3|별칭]]`;
 

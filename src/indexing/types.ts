@@ -30,8 +30,24 @@ export interface SearchResult {
 
 export interface SearchFilter {
   folders?: string[];
+  excludedFolders?: string[];
+  filePaths?: string[];
+  excludedFilePaths?: string[];
+  contentTerms?: string[];
+  lineTerms?: string[];
+  blockTerms?: string[];
+  sectionTerms?: string[];
+  taskTerms?: string[];
+  taskTodoTerms?: string[];
+  taskDoneTerms?: string[];
+  caseMode?: "default" | "match" | "ignore";
   tags?: string[];
+  excludedTags?: string[];
+  tagOperator?: "OR" | "AND";
+  requiredProperties?: string[];
+  excludedProperties?: string[];
   frontmatter?: Record<string, unknown>;
+  excludedFrontmatter?: Record<string, unknown>;
   dateRange?: {
     from?: Date;
     to?: Date;
