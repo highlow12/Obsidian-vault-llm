@@ -100,6 +100,30 @@ function normalizePath(path: string): string {
   return path.replace(/\\/g, "/").replace(/^\/+/, "").toLowerCase();
 }
 
+/**
+ * 쿼리 문자열이 Obsidian 검색 연산자로 시작하는지 확인합니다.
+ * 해당하면 두 단계 검색(연산자 필터링 → NL 키워드 하이브리드 검색)을 사용합니다.
+ *
+ * 인식하는 패턴:
+ *  - path:, file:, folder:, tag:, content:, line:, block:, section:, task:, task-todo:, task-done:
+ *  - match-case:, ignore-case:
+ *  - -<위 연산자> 형태의 음성 연산자
+ *  - [property] / [property:value] 형태의 속성 검색
+ *  - /regex/ 형태의 정규식 검색
+ *  - date>= / date<= 형태의 날짜 범위
+ */
+function startsWithSearchOperator(query: string): boolean {
+  const trimmed = query.trimStart();
+  return (
+    /^-?(?:path|file|folder|tag|content|line|block|section|task(?:-(?:todo|done))?|match-case|ignore-case):/i.test(trimmed) ||
+    /^-?\[/.test(trimmed) ||
+    // /regex/ 형식: 시작 슬래시 + 내용 + 닫는 슬래시가 반드시 있어야 함
+    /^\/[^/\s][^/]*\//.test(trimmed) ||
+    // date>= 또는 date<= 형식: 날짜 값이 뒤따라야 함
+    /^date[><]=?\S/.test(trimmed)
+  );
+}
+
 function getNestedValue(source: Record<string, unknown>, keyPath: string): unknown {
   const keys = keyPath.split(".").map((key) => key.trim()).filter((key) => key.length > 0);
   let current: unknown = source;
@@ -230,6 +254,81 @@ function matchesFilter(note: NoteMetadata, filter?: SearchFilter): boolean {
     }
   }
 
+  if (filter.requiredProperties && filter.requiredProperties.length > 0) {
+    for (const propName of filter.requiredProperties) {
+      const value = getNestedValue(note.frontmatter, propName);
+      if (value === undefined || value === null) {
+        return false;
+      }
+    }
+  }
+
+  if (filter.excludedProperties && filter.excludedProperties.length > 0) {
+    for (const propName of filter.excludedProperties) {
+      const value = getNestedValue(note.frontmatter, propName);
+      if (value !== undefined && value !== null) {
+        return false;
+      }
+    }
+  }
+
+  if (filter.frontmatterOR) {
+    for (const [keyPath, allowedValues] of Object.entries(filter.frontmatterOR)) {
+      const actualValue = getNestedValue(note.frontmatter, keyPath);
+      const anyMatch = allowedValues.some((allowed) => isPrimitiveEqual(actualValue, allowed));
+      if (!anyMatch) {
+        return false;
+      }
+    }
+  }
+
+  if (filter.excludedFrontmatterOR) {
+    for (const [keyPath, excludedValues] of Object.entries(filter.excludedFrontmatterOR)) {
+      const actualValue = getNestedValue(note.frontmatter, keyPath);
+      const anyMatch = excludedValues.some((excluded) => isPrimitiveEqual(actualValue, excluded));
+      if (anyMatch) {
+        return false;
+      }
+    }
+  }
+
+  if (filter.frontmatterComparisons && filter.frontmatterComparisons.length > 0) {
+    for (const comp of filter.frontmatterComparisons) {
+      const actualValue = getNestedValue(note.frontmatter, comp.key);
+      if (actualValue === undefined || actualValue === null) {
+        // 속성이 없는 경우: excluded 비교는 통과, 포함 비교는 실패
+        if (!comp.excluded) return false;
+        continue;
+      }
+      const actualNum = Number(actualValue);
+      const expectedNum = Number(comp.value);
+
+      let conditionMet: boolean;
+      if (!Number.isNaN(actualNum) && !Number.isNaN(expectedNum)) {
+        // 숫자 비교
+        if (comp.op === ">") conditionMet = actualNum > expectedNum;
+        else if (comp.op === "<") conditionMet = actualNum < expectedNum;
+        else if (comp.op === ">=") conditionMet = actualNum >= expectedNum;
+        else if (comp.op === "<=") conditionMet = actualNum <= expectedNum;
+        else conditionMet = actualNum !== expectedNum; // "!="
+      } else {
+        // 문자열 사전순 비교
+        const actualStr = String(actualValue).toLowerCase();
+        const expectedStr = String(comp.value).toLowerCase();
+        if (comp.op === ">") conditionMet = actualStr > expectedStr;
+        else if (comp.op === "<") conditionMet = actualStr < expectedStr;
+        else if (comp.op === ">=") conditionMet = actualStr >= expectedStr;
+        else if (comp.op === "<=") conditionMet = actualStr <= expectedStr;
+        else conditionMet = actualStr !== expectedStr; // "!="
+      }
+
+      // excluded=true이면 조건에 해당하는 노트를 제외, false이면 해당 노트만 포함
+      if (comp.excluded ? conditionMet : !conditionMet) {
+        return false;
+      }
+    }
+  }
+
   if (filter.frontmatter) {
     for (const [keyPath, expectedValue] of Object.entries(filter.frontmatter)) {
       const actualValue = getNestedValue(note.frontmatter, keyPath);
@@ -310,11 +409,25 @@ export class SearchEngine {
     const startTime = performance.now();
     const topK = k ?? 8;
     const parsedQuery = parseSearchQuery(query);
-    const semanticQuery = parsedQuery.query || query;
+
+    // 연산자가 쿼리 맨 앞에 오는 경우를 감지합니다.
+    // 예: "tag:important path:notes 머신러닝에 대해 알려줘"
+    // 이 경우 두 단계 검색을 사용합니다:
+    //  1단계(연산자): 필터로 Obsidian API 검색 → 후보 노트 수집
+    //  2단계(NL 키워드): 연산자 이후의 자연어 질문에서 키워드 추출 → 하이브리드 검색
+    const hasLeadingOperators = startsWithSearchOperator(query);
+
+    // 의미론적 검색에 사용할 쿼리:
+    //  - 연산자 선두 모드: 연산자 이후의 자연어 텍스트만 사용
+    //  - 일반 모드: 연산자를 제거한 나머지 텍스트, 없으면 원본 쿼리 사용
+    const semanticQuery = hasLeadingOperators
+      ? parsedQuery.query
+      : (parsedQuery.query || query);
+
     const effectiveFilter = filter ?? parsedQuery.filter;
 
     // 의미 있는 명사 키워드 추출 (트레이스 로그용)
-    const keywords = extractKeywords(semanticQuery);
+    const keywords = semanticQuery ? extractKeywords(semanticQuery) : [];
     const keywordQuery = keywords.join(" OR ");
 
     // 검색 쿼리: 불용어 제거 후 남은 의미 있는 키워드만 사용
@@ -322,7 +435,7 @@ export class SearchEngine {
     const fuzzyQuery = keywords.length > 0 ? keywords.join(" ") : semanticQuery;
 
     // 벡터 검색을 위한 임베딩 텍스트 생성
-    const queryEmbeddingText = buildQueryEmbeddingText(semanticQuery);
+    const queryEmbeddingText = semanticQuery ? buildQueryEmbeddingText(semanticQuery) : "";
 
     // 확장 검색 기능 사용 가능 여부 확인
     const extendedIndexer = this.indexer as unknown as ExtendedSearchCapable;
@@ -332,27 +445,40 @@ export class SearchEngine {
 
     const candidateK = topK * FUZZY_CANDIDATE_MULTIPLIER;
 
-    // Phase 1: 후보 생성 - Obsidian API 검색 또는 퍼지 검색(폴백)
-    // Obsidian API는 prepareFuzzySearch 등을 활용하여 관련도 점수를 제공할 수 있습니다.
+    // Phase 1: 후보 생성
+    // - 연산자 선두 + 자연어 없음: 필터에 매칭되는 모든 청크를 후보로 수집
+    // - 연산자 선두 + 자연어 있음: 자연어 텍스트로 Obsidian API 검색 (연산자 제외)
+    // - 일반 모드: 원본 쿼리로 Obsidian API 검색 또는 퍼지 검색(폴백)
     let rawCandidates: Array<{ chunk: Chunk; score: number }> = [];
     let obsidianScoreByChunkId: Map<string, number> | undefined;
     let fuzzyScoreByChunkId: Map<string, number> | undefined;
 
     if (this.obsidianSearchFn) {
-      // Obsidian API 검색으로 후보 생성 (퍼지 검색 대체)
-      const obsidianResults = this.obsidianSearchFn(query);
-      rawCandidates = obsidianResults;
+      if (hasLeadingOperators && !semanticQuery) {
+        // 자연어 질문 없이 연산자만 있는 경우:
+        // 필터로 좁힐 수 있도록 모든 청크를 점수 0으로 후보에 포함합니다.
+        rawCandidates = this.indexer.getAllChunks().map((chunk) => ({ chunk, score: 0 }));
+      } else {
+        // Obsidian API 검색으로 후보 생성:
+        //  - 연산자 선두 모드(semanticQuery 있음): 자연어 부분으로만 검색 (연산자 오염 방지)
+        //  - 일반 모드: 원본 쿼리로 검색 (위 hasLeadingOperators && !semanticQuery 분기에서 처리되지 않으므로 여기선 항상 query가 비어있지 않음)
+        const obsidianQuery = hasLeadingOperators ? semanticQuery : query;
+        const obsidianResults = this.obsidianSearchFn(obsidianQuery);
+        rawCandidates = obsidianResults;
 
-      // Obsidian이 의미 있는 점수를 반환한 경우 별도 추적.
-      // Obsidian의 prepareFuzzySearch는 매칭 시 양수 점수를 반환합니다.
-      // 모든 점수가 0이면 매칭 결과가 없거나 관련도 정렬을 제공하지 않는 것으로 간주하며,
-      // 이 경우 Phase 2에서 BM25 재랭킹을 적용합니다.
-      if (obsidianResults.some((r) => r.score !== 0)) {
-        obsidianScoreByChunkId = new Map(obsidianResults.map((r) => [r.chunk.id, r.score]));
+        // Obsidian이 의미 있는 점수를 반환한 경우 별도 추적.
+        // Obsidian의 prepareFuzzySearch는 매칭 시 양수 점수를 반환합니다.
+        // 모든 점수가 0이면 매칭 결과가 없거나 관련도 정렬을 제공하지 않는 것으로 간주하며,
+        // 이 경우 Phase 2에서 BM25 재랭킹을 적용합니다.
+        if (obsidianResults.some((r) => r.score !== 0)) {
+          obsidianScoreByChunkId = new Map(obsidianResults.map((r) => [r.chunk.id, r.score]));
+        }
       }
     } else if (hasFuzzy) {
       // 폴백: 트라이그램 기반 퍼지 검색
-      rawCandidates = extendedIndexer.fuzzySearch!(fuzzyQuery, candidateK);
+      // 우선순위: 키워드 쿼리(불용어 제거) > 의미론적 쿼리(연산자 제거) > 원본 쿼리
+      const fallbackQuery = fuzzyQuery || semanticQuery || query;
+      rawCandidates = extendedIndexer.fuzzySearch!(fallbackQuery, candidateK);
       if (rawCandidates.length > 0) {
         fuzzyScoreByChunkId = new Map(rawCandidates.map((r) => [r.chunk.id, r.score]));
       }
@@ -367,14 +493,15 @@ export class SearchEngine {
 
     // Phase 2: 정확도 정렬
     // - Obsidian 점수가 있으면 이미 정확도 순으로 정렬되어 있으므로 그대로 사용
-    // - 점수가 없거나(또는 퍼지 검색 사용 시) BM25로 재랭킹하여 관련성을 확보
+    // - 점수가 없거나(또는 퍼지 검색 사용 시) BM25로 관련성 재랭킹하여 관련성을 확보
+    // - 연산자 선두 + 자연어 없음: 의미론적 쿼리가 없으므로 BM25 재랭킹 건너뜀
     let sortedCandidates: Array<{ chunk: Chunk; score: number }> = [];
     let bm25ScoreByChunkId: Map<string, number> | undefined;
 
     if (obsidianScoreByChunkId) {
       // Obsidian이 관련도 점수 제공 → 이미 정렬됨, 그대로 사용
       sortedCandidates = rawCandidates;
-    } else if (rawCandidates.length > 0 && hasBm25Subset) {
+    } else if (rawCandidates.length > 0 && hasBm25Subset && semanticQuery) {
       // Obsidian 점수 없음 또는 퍼지 검색 → BM25로 관련성 재랭킹
       const candidateChunkIds = rawCandidates.map((r) => r.chunk.id);
       const bm25ScoreMap = extendedIndexer.bm25ScoreSubset!(semanticQuery, candidateChunkIds);
@@ -393,11 +520,15 @@ export class SearchEngine {
     }
 
     // Phase 3: 벡터 검색 수행
-    // Obsidian 1차 결과가 있으면 해당 후보군 내부에서만 벡터 점수를 계산합니다.
+    // - 의미론적 쿼리가 없는 경우(연산자만 있는 경우): 벡터 검색 건너뜀
+    // - Obsidian 1차 결과가 있으면 해당 후보군 내부에서만 벡터 점수를 계산합니다.
     let vectorResults: Array<{ chunk: Chunk; score: number }> = [];
     const candidateChunkIdsForVector = sortedCandidates.map((r) => r.chunk.id);
 
-    if (candidateChunkIdsForVector.length > 0 && hasVectorSubset) {
+    if (!queryEmbeddingText) {
+      // 의미론적 쿼리 없음 → 벡터 검색 건너뜀, 후보를 그대로 사용
+      vectorResults = [];
+    } else if (candidateChunkIdsForVector.length > 0 && hasVectorSubset) {
       const vectorScoreMap = await extendedIndexer.vectorScoreSubset!(
         queryEmbeddingText,
         candidateChunkIdsForVector

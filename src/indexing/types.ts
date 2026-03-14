@@ -28,6 +28,14 @@ export interface SearchResult {
   snippet: string;
 }
 
+export interface FrontmatterComparison {
+  key: string;
+  op: ">" | "<" | ">=" | "<=" | "!=";
+  value: unknown;
+  /** true이면 이 조건에 해당하는 노트를 제외합니다. */
+  excluded?: boolean;
+}
+
 export interface SearchFilter {
   folders?: string[];
   excludedFolders?: string[];
@@ -48,6 +56,16 @@ export interface SearchFilter {
   excludedProperties?: string[];
   frontmatter?: Record<string, unknown>;
   excludedFrontmatter?: Record<string, unknown>;
+  /** 속성 OR 다중값: [property:val1 OR val2] */
+  frontmatterOR?: Record<string, unknown[]>;
+  /** 제외 속성 OR 다중값: -[property:val1 OR val2] */
+  excludedFrontmatterOR?: Record<string, unknown[]>;
+  /** 속성 비교 연산자: [property:>5], [property:<=10] 등 */
+  frontmatterComparisons?: FrontmatterComparison[];
+  /** 단독 제외 항(-term): 일반 검색어에서 제외할 텀 */
+  excludedTerms?: string[];
+  /** 정규식 검색(/regex/): 본문 내 정규식 패턴 매칭 */
+  regexTerms?: RegExp[];
   dateRange?: {
     from?: Date;
     to?: Date;

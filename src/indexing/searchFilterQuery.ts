@@ -1,4 +1,4 @@
-import type { SearchFilter } from "./types";
+import type { FrontmatterComparison, SearchFilter } from "./types";
 
 export type ParsedSearchQuery = {
   query: string;
@@ -51,6 +51,15 @@ function parseTerms(value: string): string[] {
   return terms;
 }
 
+function parseOrTerms(value: string): string[] {
+  const trimmed = value.trim();
+  if (!trimmed) return [];
+  return trimmed
+    .split(/\s+OR\s+/i)
+    .map((term) => term.trim().replace(/^"|"$/g, ""))
+    .filter((term) => term.length > 0);
+}
+
 function pushFrontmatterFilter(filter: SearchFilter, key: string, value: string): void {
   const trimmedKey = key.trim();
   const trimmedValue = value.trim();
@@ -84,23 +93,42 @@ function addTerms(target: string[] | undefined, values: string[]): string[] | un
   return [...(target ?? []), ...values];
 }
 
+/**
+ * 비교 연산자 접두사를 파싱합니다.
+ * 예) ">5" → { op: ">", value: "5" }
+ */
+function parseComparisonValue(raw: string): { op: FrontmatterComparison["op"]; value: string } | undefined {
+  if (raw.startsWith(">=")) return { op: ">=", value: raw.slice(2) };
+  if (raw.startsWith("<=")) return { op: "<=", value: raw.slice(2) };
+  if (raw.startsWith("!=")) return { op: "!=", value: raw.slice(2) };
+  if (raw.startsWith(">")) return { op: ">", value: raw.slice(1) };
+  if (raw.startsWith("<")) return { op: "<", value: raw.slice(1) };
+  return undefined;
+}
+
+/**
+ * takeOperatorValues: rawQuery에서 `operator:value` 패턴을 추출합니다.
+ * 음성 연산자 접두사(-) 앞에 붙는 양성 연산자는 제외됩니다.
+ * 예) "file:" 연산자는 "-file:value"는 매칭하지 않습니다.
+ */
 function takeOperatorValues(rawQuery: string, operator: string): { values: string[]; remaining: string } {
   let remaining = rawQuery;
   const values: string[] = [];
 
-  const parenPattern = new RegExp(`${operator}:\\(([^)]*)\\)`, "gi");
+  // 부정 lookbehind (?<!-): 연산자 앞에 '-'가 없는 경우만 매칭
+  const parenPattern = new RegExp(`(?<!-)${operator}:\\(([^)]*)\\)`, "gi");
   remaining = remaining.replace(parenPattern, (_, group) => {
     values.push(group.trim());
     return " ";
   });
 
-  const quotePattern = new RegExp(`${operator}:\"([^\"]*)\"`, "gi");
+  const quotePattern = new RegExp(`(?<!-)${operator}:"([^"]*)"`, "gi");
   remaining = remaining.replace(quotePattern, (_, quoted) => {
     values.push(quoted.trim());
     return " ";
   });
 
-  const plainPattern = new RegExp(`${operator}:([^\\s]+)`, "gi");
+  const plainPattern = new RegExp(`(?<!-)${operator}:([^\\s]+)`, "gi");
   remaining = remaining.replace(plainPattern, (_, plain) => {
     values.push(String(plain).trim());
     return " ";
@@ -109,6 +137,10 @@ function takeOperatorValues(rawQuery: string, operator: string): { values: strin
   return { values: values.filter((v) => v.length > 0), remaining };
 }
 
+/**
+ * applyPropertyToken: [property] 또는 [property:value] 형식의 토큰을 파싱하여 필터에 적용합니다.
+ * OR 다중값과 비교 연산자를 지원합니다.
+ */
 function applyPropertyToken(filter: SearchFilter, token: string, isExcluded: boolean): void {
   const content = token.slice(isExcluded ? 2 : 1, -1);
   const colonIndex = content.indexOf(":");
@@ -130,18 +162,45 @@ function applyPropertyToken(filter: SearchFilter, token: string, isExcluded: boo
     return;
   }
 
-  const terms = parseTerms(value);
-  if (terms.length <= 1) {
+  // 비교 연산자 처리: [property:>5], [property:<=10], [property:!=done]
+  // 음성 비교([-property:>5])는 excluded=true 플래그와 함께 저장됩니다.
+  const comparison = parseComparisonValue(value);
+  if (comparison) {
+    const parsed = parsePrimitive(comparison.value);
+    const entry = isExcluded
+      ? { key, op: comparison.op, value: parsed, excluded: true as const }
+      : { key, op: comparison.op, value: parsed };
+    filter.frontmatterComparisons = [
+      ...(filter.frontmatterComparisons ?? []),
+      entry,
+    ];
+    return;
+  }
+
+  // OR 다중값 처리: [property:val1 OR val2], -[property:val1 OR val2]
+  const orParts = parseOrTerms(value);
+  if (orParts.length > 1) {
+    const orValues = orParts.map((v) => parsePrimitive(v));
     if (isExcluded) {
-      pushExcludedFrontmatterFilter(filter, key, value.replace(/^"|"$/g, ""));
+      filter.excludedFrontmatterOR = {
+        ...(filter.excludedFrontmatterOR ?? {}),
+        [key]: orValues,
+      };
     } else {
-      pushFrontmatterFilter(filter, key, value.replace(/^"|"$/g, ""));
+      filter.frontmatterOR = {
+        ...(filter.frontmatterOR ?? {}),
+        [key]: orValues,
+      };
     }
     return;
   }
 
-  // OR 그룹은 현재 구현에서 다중 허용값 집합으로 저장하지 않으므로,
-  // 연산자 문자열을 일반 쿼리에 남겨 Obsidian 1차 검색이 처리하도록 합니다.
+  // 단일 값
+  if (isExcluded) {
+    pushExcludedFrontmatterFilter(filter, key, value.replace(/^"|"$/g, ""));
+  } else {
+    pushFrontmatterFilter(filter, key, value.replace(/^"|"$/g, ""));
+  }
 }
 
 export function parseSearchQuery(rawQuery: string): ParsedSearchQuery {
@@ -162,10 +221,17 @@ export function parseSearchQuery(rawQuery: string): ParsedSearchQuery {
     return token;
   });
 
-  const pathParsed = takeOperatorValues(workingQuery, "path");
-  workingQuery = pathParsed.remaining;
-  filter.folders = addTerms(filter.folders, pathParsed.values.map((v) => normalizeFolderPath(v)));
+  // 정규식 검색 /regex/: 슬래시로 둘러싸인 패턴 추출
+  workingQuery = workingQuery.replace(/\/([^/]+)\//g, (_, pattern) => {
+    try {
+      filter.regexTerms = [...(filter.regexTerms ?? []), new RegExp(pattern, "i")];
+    } catch {
+      // 유효하지 않은 정규식은 무시
+    }
+    return " ";
+  });
 
+  // 음성 연산자(-operator:value)를 먼저 처리하여 양성 연산자가 잘못 소비하지 않도록 합니다.
   const minusPathParsed = takeOperatorValues(workingQuery, "-path");
   workingQuery = minusPathParsed.remaining;
   filter.excludedFolders = addTerms(
@@ -173,9 +239,9 @@ export function parseSearchQuery(rawQuery: string): ParsedSearchQuery {
     minusPathParsed.values.map((v) => normalizeFolderPath(v))
   );
 
-  const fileParsed = takeOperatorValues(workingQuery, "file");
-  workingQuery = fileParsed.remaining;
-  filter.filePaths = addTerms(filter.filePaths, fileParsed.values.map((v) => normalizeFolderPath(v)));
+  const pathParsed = takeOperatorValues(workingQuery, "path");
+  workingQuery = pathParsed.remaining;
+  filter.folders = addTerms(filter.folders, pathParsed.values.map((v) => normalizeFolderPath(v)));
 
   const minusFileParsed = takeOperatorValues(workingQuery, "-file");
   workingQuery = minusFileParsed.remaining;
@@ -184,9 +250,9 @@ export function parseSearchQuery(rawQuery: string): ParsedSearchQuery {
     minusFileParsed.values.map((v) => normalizeFolderPath(v))
   );
 
-  const folderParsed = takeOperatorValues(workingQuery, "folder");
-  workingQuery = folderParsed.remaining;
-  filter.folders = addTerms(filter.folders, folderParsed.values.map((v) => normalizeFolderPath(v)));
+  const fileParsed = takeOperatorValues(workingQuery, "file");
+  workingQuery = fileParsed.remaining;
+  filter.filePaths = addTerms(filter.filePaths, fileParsed.values.map((v) => normalizeFolderPath(v)));
 
   const minusFolderParsed = takeOperatorValues(workingQuery, "-folder");
   workingQuery = minusFolderParsed.remaining;
@@ -195,18 +261,22 @@ export function parseSearchQuery(rawQuery: string): ParsedSearchQuery {
     minusFolderParsed.values.map((v) => normalizeFolderPath(v))
   );
 
-  const tagParsed = takeOperatorValues(workingQuery, "tag");
-  workingQuery = tagParsed.remaining;
-  filter.tags = addTerms(
-    filter.tags,
-    tagParsed.values.map((v) => v.replace(/^#/, "").trim().toLowerCase())
-  );
+  const folderParsed = takeOperatorValues(workingQuery, "folder");
+  workingQuery = folderParsed.remaining;
+  filter.folders = addTerms(filter.folders, folderParsed.values.map((v) => normalizeFolderPath(v)));
 
   const minusTagParsed = takeOperatorValues(workingQuery, "-tag");
   workingQuery = minusTagParsed.remaining;
   filter.excludedTags = addTerms(
     filter.excludedTags,
     minusTagParsed.values.map((v) => v.replace(/^#/, "").trim().toLowerCase())
+  );
+
+  const tagParsed = takeOperatorValues(workingQuery, "tag");
+  workingQuery = tagParsed.remaining;
+  filter.tags = addTerms(
+    filter.tags,
+    tagParsed.values.map((v) => v.replace(/^#/, "").trim().toLowerCase())
   );
 
   const contentParsed = takeOperatorValues(workingQuery, "content");
@@ -251,11 +321,24 @@ export function parseSearchQuery(rawQuery: string): ParsedSearchQuery {
     terms.push(...ignoreCaseParsed.values.flatMap((v) => parseTerms(v)));
   }
 
-  // 커스텀 하위호환 문법
+  // 나머지 토큰 파싱: 커스텀 하위호환 문법 및 일반 검색어
   const matches = workingQuery.matchAll(TOKEN_REGEX);
   for (const match of matches) {
     const token = (match[1] ?? match[2] ?? "").trim();
     if (!token) {
+      continue;
+    }
+
+    // 단독 제외 항: -term (연산자가 아닌 일반 단어 앞에 붙은 '-')
+    if (match[2] && token.startsWith("-") && token.length > 1 && !token.includes(":")) {
+      const excluded = token.slice(1);
+      if (excluded) {
+        filter.excludedTerms = [...(filter.excludedTerms ?? []), excluded];
+        continue;
+      }
+    }
+
+    if (token === "OR") {
       continue;
     }
 
@@ -346,6 +429,11 @@ export function parseSearchQuery(rawQuery: string): ParsedSearchQuery {
     (filter.excludedProperties?.length ?? 0) > 0 ||
     Object.keys(filter.frontmatter ?? {}).length > 0 ||
     Object.keys(filter.excludedFrontmatter ?? {}).length > 0 ||
+    Object.keys(filter.frontmatterOR ?? {}).length > 0 ||
+    Object.keys(filter.excludedFrontmatterOR ?? {}).length > 0 ||
+    (filter.frontmatterComparisons?.length ?? 0) > 0 ||
+    (filter.excludedTerms?.length ?? 0) > 0 ||
+    (filter.regexTerms?.length ?? 0) > 0 ||
     filter.caseMode === "match" ||
     filter.caseMode === "ignore" ||
     !!filter.dateRange?.from ||
