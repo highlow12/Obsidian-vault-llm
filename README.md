@@ -52,6 +52,75 @@
 - frontmatter, 태그, 내부 링크 파싱
 - JSON 파일 기반 로컬 메타데이터/벡터 스토어
 
+### 🔍 고급 검색 쿼리 문법
+
+검색 입력창에서 아래 필터 문법을 사용해 검색 범위를 정밀하게 제어할 수 있습니다.
+
+#### 폴더 / 파일 필터
+
+| 문법 | 설명 |
+|------|------|
+| `folder:docs` | `docs` 폴더 내 파일만 검색 |
+| `-folder:private` | `private` 폴더 제외 |
+| `path:projects/2024` | 지정 경로 내 파일만 검색 |
+| `-path:archive` | 지정 경로 제외 |
+| `file:guide.md` | 특정 파일만 검색 |
+| `-file:draft.md` | 특정 파일 제외 |
+
+#### 태그 필터
+
+| 문법 | 설명 |
+|------|------|
+| `tag:rag` 또는 `tag:#rag` | `rag` 태그가 있는 노트만 검색 |
+| `-tag:archive` | `archive` 태그 노트 제외 |
+| `tag:개발/검색` | 계층형 태그 검색 지원 |
+| `tag:rag tag:llm` | 여러 태그 중 하나라도 포함된 노트 검색 (OR 조건) |
+
+> **태그 조건**: 쿼리 문법에서 여러 `tag:` 필터를 사용하면 **OR** 조건으로 동작합니다 (태그 중 하나만 있어도 검색 포함).
+
+#### Frontmatter(속성) 필터
+
+| 문법 | 설명 |
+|------|------|
+| `[status]` | `status` 속성이 존재하는 노트만 검색 |
+| `-[status]` | `status` 속성이 없는 노트만 검색 |
+| `[status:done]` | `status`가 `done`인 노트만 검색 |
+| `-[status:wip]` | `status`가 `wip`인 노트 제외 |
+| `[priority:>3]` | `priority`가 3 초과인 노트 검색 (`>`, `<`, `>=`, `<=`, `!=` 지원) |
+| `[status:done OR wip]` | `status`가 `done` 또는 `wip`인 노트 검색 |
+| `meta.author:kim` 또는 `fm.author:kim` | 최상위 속성 검색 (`author: kim`) |
+| `meta.author.name:kim` 또는 `fm.author.name:kim` | 중첩 속성 검색 (`author: { name: kim }`) |
+| `date>=2024-01-01` | 수정일이 2024-01-01 이후인 노트 검색 |
+| `date<=2024-12-31` | 수정일이 2024-12-31 이전인 노트 검색 |
+
+#### 내용 / 태스크 필터
+
+| 문법 | 설명 |
+|------|------|
+| `content:keyword` | 본문에 특정 단어가 있는 청크만 검색 |
+| `line:keyword` | 단일 라인에 단어가 포함된 청크 검색 |
+| `section:keyword` | 섹션 내에 단어가 포함된 청크 검색 |
+| `task:keyword` | 태스크 항목 검색 (`- [ ]`, `- [x]`) |
+| `task-todo:keyword` | 미완료 태스크 검색 |
+| `task-done:keyword` | 완료된 태스크 검색 |
+
+#### 기타 고급 필터
+
+| 문법 | 설명 |
+|------|------|
+| `-keyword` | 특정 단어를 검색 결과에서 제외 |
+| `/regex/` | 정규식 패턴으로 본문 검색 |
+| `match-case:keyword` | 대소문자 정확히 일치 |
+| `ignore-case:keyword` | 대소문자 무시 |
+
+**복합 예시**
+```
+folder:projects tag:rag [status:done] date>=2024-01-01 벡터 검색
+```
+→ `projects` 폴더, `rag` 태그, `status=done`, 2024년 이후 수정된 노트에서 "벡터 검색" 질의
+
+> **필터 조합**: 여러 필터를 공백으로 구분하면 **AND** 조건으로 모두 만족하는 노트만 검색합니다.
+
 #### 임베딩 제공자 선택
 
 | 제공자 | 기본 모델 | 설명 |
@@ -224,15 +293,25 @@ Obsidian → 설정 → **OVL 설정** 탭을 엽니다.
 | 대화 세션 저장/불러오기 | ✅ 완료 |
 | 대화 마크다운 저장 | ✅ 완료 |
 | 주제 분리 AI | ✅ 완료 |
+| 폴더/파일 기반 검색 필터 | ✅ 완료 |
+| 태그 필터 (다중 태그 OR, 계층형 태그 지원) | ✅ 완료 |
+| Frontmatter 필터 (키/값, 비교 연산자, OR 다중값, 날짜 범위) | ✅ 완료 |
+| 내용/라인/섹션/태스크 검색 필터 | ✅ 완료 |
+| 정규식 검색, 검색어 제외, 대소문자 모드 | ✅ 완료 |
 
 ---
 
 ### 🚀 Phase 2: 검색 고도화 및 성능 최적화
 
 #### 검색 필터 구현
-- [ ] 폴더 기반 필터 (특정 폴더만 검색, 폴더 제외)
-- [ ] 태그 필터 (다중 태그 AND/OR 조건)
-- [ ] Frontmatter 필터 (키/값, 날짜 범위)
+- [x] 폴더 기반 필터 (특정 폴더만 검색, 폴더 제외) — `folder:`, `path:`, `-folder:`, `-path:`, `file:`, `-file:`
+- [x] 태그 필터 (다중 태그 OR 조건, 계층형 태그 지원) — `tag:`, `-tag:`, 계층형 태그 지원; AND 조건은 API를 통해 지원
+- [x] Frontmatter 필터 (키/값, 날짜 범위) — `[property:value]`, `meta.key:value`, `fm.key:value`, `date>=`, `date<=`
+- [x] Frontmatter 비교 연산자 — `[property:>5]`, `[property:<=10]`, `[property:!=done]`
+- [x] Frontmatter OR 다중값 — `[property:val1 OR val2]`
+- [x] 내용/라인/블록/섹션 검색 필터 — `content:`, `line:`, `block:`, `section:`
+- [x] 태스크 검색 필터 — `task:`, `task-todo:`, `task-done:`
+- [x] 검색어 제외, 대소문자 모드, 정규식 검색 — `-term`, `match-case:`, `ignore-case:`, `/regex/`
 
 #### 성능 최적화
 - [ ] ANN(Approximate Nearest Neighbor) 알고리즘 도입 (FAISS 또는 hnswlib)
@@ -318,9 +397,9 @@ A: 4턴 이상의 대화에서만 작동하며, 의미적으로 구분되는 주
 기여를 환영합니다! 이슈 등록 또는 Pull Request를 통해 참여해 주세요.
 
 ### 우선순위 기여 영역
-1. **검색 필터 구현** — 폴더, 태그, frontmatter 필터
-2. **성능 최적화** — ANN 알고리즘 도입, 배치 처리
-3. **테스트 커버리지 향상** — 80% 목표
+1. **성능 최적화** — ANN 알고리즘 도입, 배치 처리
+2. **테스트 커버리지 향상** — 80% 목표
+3. **UX 개선** — 대화 컨텍스트 관리, 인라인 AI 어시스턴트
 
 ### 기여 방법
 1. 이슈 생성: 기여하고 싶은 기능이나 버그를 이슈로 등록
