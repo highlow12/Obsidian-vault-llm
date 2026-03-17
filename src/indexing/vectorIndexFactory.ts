@@ -2,6 +2,7 @@
 
 import { IndexingConfig } from "./types";
 import { VectorStore } from "./vectorStore";
+import { HnswVectorStore } from "./hnswVectorStore";
 import { VectorIndex } from "./vectorIndex";
 
 export function createVectorIndex(config: IndexingConfig, indexSignature: string): VectorIndex {
@@ -9,6 +10,10 @@ export function createVectorIndex(config: IndexingConfig, indexSignature: string
 
   if (engine === "json") {
     return new VectorStore(config.vectorStorePath, indexSignature);
+  }
+
+  if (engine === "hnsw") {
+    return new HnswVectorStore(config.vectorStorePath, indexSignature);
   }
 
   throw new Error(`아직 지원하지 않는 벡터 인덱스 엔진입니다: ${engine}`);
