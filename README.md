@@ -314,7 +314,7 @@ Obsidian → 설정 → **OVL 설정** 탭을 엽니다.
 - [x] 검색어 제외, 대소문자 모드, 정규식 검색 — `-term`, `match-case:`, `ignore-case:`, `/regex/`
 
 #### 성능 최적화
-- [ ] ANN(Approximate Nearest Neighbor) 알고리즘 도입 (FAISS 또는 hnswlib)
+- [x] ANN(Approximate Nearest Neighbor) 알고리즘 도입 (FAISS 또는 hnswlib)
 - [ ] 배치 임베딩 처리 (기초 구현 완료: `embedBatch()` 제공, 인덱서 일괄 처리 최적화 예정)
 - [ ] 온디맨드 임베딩 로드 및 LRU 캐시 (지연 로딩/기본 캐시 구현, LRU 정책 미구현)
 - [ ] 대용량 파일 처리 개선
