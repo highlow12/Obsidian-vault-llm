@@ -8,14 +8,8 @@
 
 .ovl-chat-header {
 	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	gap: 12px;
-}
-
-.ovl-chat-title {
-	font-size: 1.1rem;
-	font-weight: 600;
+	flex-direction: column;
+	gap: 6px;
 }
 
 .ovl-chat-session {
@@ -25,19 +19,20 @@
 }
 
 .ovl-chat-session input {
-	width: 180px;
+	flex: 1;
+	min-width: 0;
 }
 
 .ovl-chat-controls {
 	display: flex;
 	align-items: center;
 	flex-wrap: wrap;
-	gap: 8px;
+	gap: 6px;
 }
 
 .ovl-session-select {
-	min-width: 220px;
-	max-width: 320px;
+	flex: 1;
+	min-width: 0;
 }
 
 .ovl-chat-messages {
@@ -215,7 +210,15 @@
 	}
 }
 
-.ovl-chat-busy {
-	opacity: 0.6;
-	pointer-events: none;
+.ovl-chat-busy button:disabled,
+.ovl-chat-busy select:disabled,
+.ovl-chat-busy textarea:disabled {
+	opacity: 0.5;
+}
+
+/* 스트리밍 중 중단 버튼은 강조 표시 */
+.ovl-chat-busy .ovl-stop-button:not(:disabled) {
+	opacity: 1;
+	box-shadow: 0 0 0 2px var(--color-red);
+	color: var(--color-red);
 }

@@ -87,7 +87,6 @@ export class ChatView extends ItemView {
     contentEl.addClass("ovl-chat-view");
 
     const headerEl = contentEl.createEl("div", { cls: "ovl-chat-header" });
-    headerEl.createEl("div", { cls: "ovl-chat-title", text: "OVL 대화" });
 
     const sessionWrapEl = headerEl.createEl("div", { cls: "ovl-chat-session" });
     sessionWrapEl.createEl("span", { text: "제목" });
@@ -151,7 +150,7 @@ export class ChatView extends ItemView {
     });
     this.sendButtonEl = sendButtonEl;
 
-    const stopButtonEl = actionWrapEl.createEl("button", { text: "중단", cls: "ovl-chat-button" });
+    const stopButtonEl = actionWrapEl.createEl("button", { text: "중단", cls: "ovl-chat-button ovl-stop-button" });
     stopButtonEl.disabled = true;
     stopButtonEl.addEventListener("click", () => {
       this.handleStopStreaming();
