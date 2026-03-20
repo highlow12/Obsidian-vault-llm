@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "build": "node esbuild.config.mjs",
+    "build:prod": "node esbuild.config.mjs --prod",
     "build:cli": "tsc -p tsconfig.json",
     "dev": "node esbuild.config.mjs --watch",
     "test": "npm run build:cli && node --test dist/tests/*.test.js"
