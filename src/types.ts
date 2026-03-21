@@ -1,4 +1,4 @@
-export type ApiProvider = "gemini" | "openai" | "ollama" | "custom";
+export type ApiProvider = "gemini" | "openai" | "claude" | "ollama" | "custom";
 export type EmbeddingProvider = "gemini" | "openai" | "local" | "custom";
 
 export type OvlSettings = {
@@ -33,6 +33,10 @@ export const PROVIDER_PRESETS: Record<ApiProvider, { apiUrl: string; model: stri
   openai: {
     apiUrl: "https://api.openai.com/v1/chat/completions",
     model: "gpt-4o-mini"
+  },
+  claude: {
+    apiUrl: "https://api.anthropic.com/v1/messages",
+    model: "claude-sonnet-4-5"
   },
   ollama: {
     apiUrl: "http://localhost:11434/v1/chat/completions",

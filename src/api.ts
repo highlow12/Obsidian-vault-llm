@@ -25,6 +25,10 @@ export class OvlApiClient {
       return this.requestGeminiReply(settings, turns);
     }
 
+    if (settings.provider === "claude") {
+      return this.requestClaudeReply(settings, turns);
+    }
+
     return this.requestOpenAiCompatibleReply(settings, turns);
   }
 
@@ -36,6 +40,10 @@ export class OvlApiClient {
 
     if (settings.provider === "gemini") {
       return this.requestGeminiReplyStream(settings, turns, options);
+    }
+
+    if (settings.provider === "claude") {
+      return this.requestClaudeReplyStream(settings, turns, options);
     }
 
     return this.requestOpenAiCompatibleReplyStream(settings, turns, options);
@@ -55,6 +63,13 @@ export class OvlApiClient {
 
     if (settings.provider === "gemini") {
       return this.requestGeminiReply(settings, turns, {
+        modelName,
+        systemPrompt: ""
+      });
+    }
+
+    if (settings.provider === "claude") {
+      return this.requestClaudeReply(settings, turns, {
         modelName,
         systemPrompt: ""
       });
@@ -80,6 +95,13 @@ export class OvlApiClient {
 
     if (settings.provider === "gemini") {
       return this.requestGeminiReply(settings, turns, {
+        modelName,
+        systemPrompt: ""
+      });
+    }
+
+    if (settings.provider === "claude") {
+      return this.requestClaudeReply(settings, turns, {
         modelName,
         systemPrompt: ""
       });
@@ -285,6 +307,235 @@ export class OvlApiClient {
         error: message
       });
       throw new Error(`스트리밍 응답 처리 실패: ${message}`);
+    }
+
+    return fullText.trim();
+  }
+
+  private async requestClaudeReply(
+    settings: OvlSettings,
+    turns: ConversationTurn[],
+    options?: { modelName?: string; systemPrompt?: string | null }
+  ): Promise<string> {
+    const apiKey = settings.apiKey.trim();
+    if (!apiKey) {
+      throw new Error("Claude API 키를 입력해 주세요.");
+    }
+
+    const modelName = options?.modelName?.trim() || settings.model.trim() || PROVIDER_PRESETS.claude.model;
+    if (!modelName) {
+      throw new Error("Claude 모델 이름을 입력해 주세요.");
+    }
+
+    const systemPrompt = (options?.systemPrompt ?? settings.systemPrompt).trim();
+    const messages = turns
+      .filter((turn) => turn.role !== "system")
+      .map((turn) => ({
+        role: turn.role as "user" | "assistant",
+        content: turn.content
+      }));
+
+    const payload: {
+      model: string;
+      max_tokens: number;
+      messages: Array<{ role: "user" | "assistant"; content: string }>;
+      system?: string;
+    } = {
+      model: modelName,
+      max_tokens: 8192,
+      messages
+    };
+
+    if (systemPrompt) {
+      payload.system = systemPrompt;
+    }
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01"
+    };
+
+    const apiUrl = settings.apiUrl.trim() || PROVIDER_PRESETS.claude.apiUrl;
+
+    let response: { text: string; json?: unknown; status?: number };
+    try {
+      response = await requestUrl({
+        url: apiUrl,
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload)
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await this.log("claude request failed", {
+        model: modelName,
+        body: payload,
+        error: message
+      });
+      throw new Error(`Claude 요청 실패: ${message}`);
+    }
+
+    const status = response.status;
+    if (status && status >= 400) {
+      await this.log("claude response error", {
+        model: modelName,
+        body: payload,
+        status,
+        response: response.text
+      });
+      throw new Error(`Claude API 오류: ${status}`);
+    }
+
+    const data = this.parseJsonResponse(response.text, response.json);
+    const text =
+      (data as { content?: Array<{ type?: string; text?: string }> })?.content
+        ?.filter((block) => block.type === "text")
+        .map((block) => block.text ?? "")
+        .join("") ?? "";
+
+    if (!text) {
+      await this.log("claude response invalid", { model: modelName, response: data });
+      throw new Error("응답 형식이 올바르지 않습니다.");
+    }
+
+    return text.trim();
+  }
+
+  private async requestClaudeReplyStream(
+    settings: OvlSettings,
+    turns: ConversationTurn[],
+    streamOptions: AssistantReplyStreamOptions,
+    options?: { modelName?: string; systemPrompt?: string | null }
+  ): Promise<string> {
+    const apiKey = settings.apiKey.trim();
+    if (!apiKey) {
+      throw new Error("Claude API 키를 입력해 주세요.");
+    }
+
+    const modelName = options?.modelName?.trim() || settings.model.trim() || PROVIDER_PRESETS.claude.model;
+    if (!modelName) {
+      throw new Error("Claude 모델 이름을 입력해 주세요.");
+    }
+
+    const systemPrompt = (options?.systemPrompt ?? settings.systemPrompt).trim();
+    const messages = turns
+      .filter((turn) => turn.role !== "system")
+      .map((turn) => ({
+        role: turn.role as "user" | "assistant",
+        content: turn.content
+      }));
+
+    const payload: {
+      model: string;
+      max_tokens: number;
+      messages: Array<{ role: "user" | "assistant"; content: string }>;
+      system?: string;
+      stream: boolean;
+    } = {
+      model: modelName,
+      max_tokens: 8192,
+      messages,
+      stream: true
+    };
+
+    if (systemPrompt) {
+      payload.system = systemPrompt;
+    }
+
+    const apiUrl = settings.apiUrl.trim() || PROVIDER_PRESETS.claude.apiUrl;
+
+    let response: Response;
+    try {
+      response = await fetch(apiUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01"
+        },
+        body: JSON.stringify(payload),
+        signal: streamOptions.signal
+      });
+    } catch (error) {
+      if (this.isAbortError(error)) {
+        throw this.createAbortError();
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      await this.log("claude stream request failed", {
+        model: modelName,
+        body: payload,
+        error: message
+      });
+      throw new Error(`Claude 스트리밍 요청 실패: ${message}`);
+    }
+
+    if (!response.ok) {
+      const responseText = await response.text();
+      await this.log("claude stream response error", {
+        model: modelName,
+        body: payload,
+        status: response.status,
+        response: responseText
+      });
+      throw new Error(`Claude API 오류: ${response.status}`);
+    }
+
+    if (!response.body) {
+      const fallback = await this.requestClaudeReply(settings, turns, options);
+      streamOptions.onToken(fallback);
+      return fallback;
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let fullText = "";
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+        const chunks = buffer.split("\n\n");
+        buffer = chunks.pop() ?? "";
+
+        for (const chunk of chunks) {
+          const parsedChunk = this.parseClaudeSseChunk(chunk);
+          if (parsedChunk.usage) {
+            streamOptions.onUsage?.(parsedChunk.usage);
+          }
+          for (const token of parsedChunk.tokens) {
+            fullText += token;
+            streamOptions.onToken(token);
+          }
+        }
+      }
+
+      if (buffer.trim()) {
+        const parsedChunk = this.parseClaudeSseChunk(buffer);
+        if (parsedChunk.usage) {
+          streamOptions.onUsage?.(parsedChunk.usage);
+        }
+        for (const token of parsedChunk.tokens) {
+          fullText += token;
+          streamOptions.onToken(token);
+        }
+      }
+    } catch (error) {
+      if (this.isAbortError(error)) {
+        throw this.createAbortError();
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      await this.log("claude stream read failed", {
+        model: modelName,
+        body: payload,
+        error: message
+      });
+      throw new Error(`Claude 스트리밍 응답 처리 실패: ${message}`);
     }
 
     return fullText.trim();
@@ -590,6 +841,75 @@ export class OvlApiClient {
     }
 
     return { tokens, usage };
+  }
+
+  private parseClaudeSseChunk(chunk: string): { tokens: string[]; usage?: AssistantTokenUsage } {
+    const tokens: string[] = [];
+    let usage: AssistantTokenUsage | undefined;
+    const lines = chunk
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith("data:"));
+
+    for (const line of lines) {
+      const payload = line.slice("data:".length).trim();
+      if (!payload || payload === "[DONE]") {
+        continue;
+      }
+
+      let data: unknown;
+      try {
+        data = JSON.parse(payload);
+      } catch {
+        continue;
+      }
+
+      // content_block_delta 이벤트에서 텍스트 토큰 추출
+      const eventType = (data as { type?: string })?.type;
+      if (eventType === "content_block_delta") {
+        const delta = (data as { delta?: { type?: string; text?: string } })?.delta;
+        if (delta?.type === "text_delta" && delta.text) {
+          tokens.push(delta.text);
+        }
+      }
+
+      // message_delta 이벤트에서 사용량 추출
+      if (eventType === "message_delta") {
+        const claudeUsage = this.extractClaudeUsage(data);
+        if (claudeUsage) {
+          usage = claudeUsage;
+        }
+      }
+
+      // message_start 이벤트에서 입력 토큰 수 추출
+      if (eventType === "message_start") {
+        const messageUsage = (data as {
+          message?: { usage?: { input_tokens?: number } };
+        })?.message?.usage;
+        if (messageUsage) {
+          usage = { ...usage, inputTokens: messageUsage.input_tokens };
+        }
+      }
+    }
+
+    return { tokens, usage };
+  }
+
+  private extractClaudeUsage(data: unknown): AssistantTokenUsage | null {
+    const usage = (data as {
+      usage?: { output_tokens?: number };
+    })?.usage;
+
+    if (!usage) {
+      return null;
+    }
+
+    const outputTokens = Number(usage.output_tokens);
+    if (!Number.isFinite(outputTokens)) {
+      return null;
+    }
+
+    return { outputTokens };
   }
 
   private parseGeminiSseChunk(

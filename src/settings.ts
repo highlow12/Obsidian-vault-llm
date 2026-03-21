@@ -35,6 +35,7 @@ export class OvlSettingTab extends PluginSettingTab {
           .addOptions({
             gemini: "Google Gemini",
             openai: "OpenAI 호환",
+            claude: "Claude (Anthropic)",
             ollama: "Ollama (로컬)",
             custom: "사용자 지정"
           })
@@ -69,15 +70,17 @@ export class OvlSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("API 키")
       .setDesc("필요한 경우 Bearer 토큰 또는 제공사 키를 입력하세요.")
-      .addText((text) =>
+      .addText((text) => {
         text
           .setPlaceholder("선택")
           .setValue(this.plugin.settings.apiKey)
           .onChange(async (value) => {
             this.plugin.settings.apiKey = value;
             await this.plugin.saveSettings();
-          })
-      );
+          });
+        // API 키를 비밀번호처럼 숨김 처리합니다.
+        text.inputEl.type = "password";
+      });
 
     if (this.plugin.settings.provider === "gemini") {
       new Setting(containerEl)
@@ -385,15 +388,17 @@ export class OvlSettingTab extends PluginSettingTab {
       new Setting(containerEl)
         .setName("임베딩 API 키")
         .setDesc("임베딩 API 키 (비어있으면 LLM API 키 사용)")
-        .addText((text) =>
+        .addText((text) => {
           text
             .setPlaceholder("선택")
             .setValue(this.plugin.settings.embeddingApiKey)
             .onChange(async (value) => {
               this.plugin.settings.embeddingApiKey = value;
               await this.plugin.saveSettings();
-            })
-        );
+            });
+          // 임베딩 API 키를 비밀번호처럼 숨김 처리합니다.
+          text.inputEl.type = "password";
+        });
     }
 
     new Setting(containerEl)
