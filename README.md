@@ -2,7 +2,7 @@
 
 > Because remembering what you wrote 3 months ago is overrated.
 
-[![Version](https://img.shields.io/badge/version-0.3.0-blue)](https://github.com/highlow12/Obsidian-vault-llm/releases)
+[![Version](https://img.shields.io/badge/version-1.0.0-blue)](https://github.com/highlow12/Obsidian-vault-llm/releases)
 [![Obsidian](https://img.shields.io/badge/Obsidian-1.5.0+-purple)](https://obsidian.md)
 [![Platform](https://img.shields.io/badge/platform-Desktop-green)](https://obsidian.md)
 [![AI Generated](https://img.shields.io/badge/100%25-AI%20Generated-orange)](https://github.com/highlow12/Obsidian-vault-llm)
